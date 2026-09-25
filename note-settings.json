@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "median_frames": 5,
+  "change_hold_seconds": 0.06,
+  "min_note_seconds": 0.1,
+  "same_note_gap_seconds": 0.03,
+  "hysteresis_semitones": 0.8,
+  "refine_boundary": true,
+  "onset_prominence_db": 6.0
+}

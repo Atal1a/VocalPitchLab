@@ -1,0 +1,35 @@
+{
+  "retrieved": "2026-09-25",
+  "sources": [
+    {
+      "file": "bs-pinned.json",
+      "url": "https://huggingface.co/api/models/becruily/bs-roformer-karaoke/revision/f7849ae934209184dc288d1018cd8a76a7fc8b3c",
+      "sha256": "c520e0e11d95f596400020c51f1162291b277c43fcce28229c4bbbee50cdf2c0"
+    },
+    {
+      "file": "kim-pinned.json",
+      "url": "https://huggingface.co/api/models/KimberleyJSN/melbandroformer/revision/ac9b0614ab3cd7f77219e18ba494dfd93956c348",
+      "sha256": "b564a8e4ba6cefc2cd664e47b2a462372b1654b10f7bb8ca46b3f7315536daba"
+    },
+    {
+      "file": "rmvpe-pinned.json",
+      "url": "https://huggingface.co/api/models/lj1995/VoiceConversionWebUI/revision/e6d0c1a17da07c33557852f9dfa2bd44cc75737d",
+      "sha256": "4df0c9ce95e4e685cee61d03257916749cf9aad7cf051b2bcdb42ba8388ddbe6"
+    },
+    {
+      "file": "game-releases.json",
+      "url": "https://api.github.com/repos/openvpi/GAME/releases",
+      "sha256": "9304a107c3e78a5089113fb0bd5983cc9b24a3c2feedb832011ff2ff66da4845"
+    },
+    {
+      "file": "game-v1.0.3-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/openvpi/GAME/v1.0.3/LICENSE",
+      "sha256": "515ecbf58c3f070e2bc8e95b0c3aa66a41431950ce31cd25d3e9abd49db28d0f"
+    },
+    {
+      "file": "rmvpe-publisher-terms.txt",
+      "url": "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/e6d0c1a17da07c33557852f9dfa2bd44cc75737d/%E4%BD%BF%E7%94%A8%E9%9C%80%E9%81%B5%E5%AE%88%E7%9A%84%E5%8D%8F%E8%AE%AE-LICENSE.txt",
+      "sha256": "364d04d646ecb3ffcfc39426eb746f6c24c76e3d8b264ff06b8a91f091530e0c"
+    }
+  ]
+}

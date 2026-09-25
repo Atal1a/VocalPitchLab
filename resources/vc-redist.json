@@ -1,0 +1,14 @@
+{
+  "name": "Microsoft Visual C++ v14 Redistributable (x64)",
+  "version": "14.51.36247.0",
+  "file": "vc_redist.x64.exe",
+  "bytes": 18731856,
+  "sha256": "843068991daaa1f73ad9f6239bce4d0f6a07a51f18c37ea2a867e9beca71295c",
+  "download_url": "https://aka.ms/vc14/vc_redist.x64.exe",
+  "acquired_from": "https://aka.ms/vc14/vc_redist.x64.exe",
+  "acquired_date": "2026-09-25",
+  "signature_at_acquisition": "Valid; Microsoft Corporation",
+  "documentation": "https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files",
+  "license": "Microsoft Visual C++ Redistributable license; not covered by project GPL-3.0-only",
+  "distribution_review": "Preserve original installer and its license; publisher redistribution eligibility remains part of third-party review"
+}
