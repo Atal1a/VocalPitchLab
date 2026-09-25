@@ -1,0 +1,72 @@
+[
+  {
+    "path": "models/rmvpe.pt",
+    "sha256": "6d62215f4306e3ca278246188607209f09af3dc77ed4232efdd069798c4ec193",
+    "bytes": 181184272
+  },
+  {
+    "path": "models/roformer/vocals_mel_band_roformer.ckpt",
+    "sha256": "87201f4d31afb5bc79993230fc49446918425574db48c01c405e44f365c7559e",
+    "bytes": 913106900
+  },
+  {
+    "path": "models/lead-separation/bs_roformer_karaoke_frazer_becruily.ckpt",
+    "sha256": "eb90ee24c1154d83fbcfd27e96182f19e061557cc6e4746953125e08c29389f9",
+    "bytes": 204436907
+  },
+  {
+    "path": "models/game-small/GAME-1.0.3-small-onnx/bd2dur.onnx",
+    "sha256": "6672d56b00f27a20e9bfaa92801c15e394bb520e49031d3ed2515b0a6cf27402",
+    "bytes": 4569
+  },
+  {
+    "path": "models/game-small/GAME-1.0.3-small-onnx/config.json",
+    "sha256": "60dfe7e7b57db29475604eeea9b2abf5f8cd2a49326f1f4bc0e1c14ed151a55e",
+    "bytes": 198
+  },
+  {
+    "path": "models/game-small/GAME-1.0.3-small-onnx/dur2bd.onnx",
+    "sha256": "49d10d1ea186e43c51fd2c51cedb01a3852d363f1c7056ae77df50f7e8dd0996",
+    "bytes": 2632
+  },
+  {
+    "path": "models/game-small/GAME-1.0.3-small-onnx/encoder.onnx",
+    "sha256": "a6868a702d9c88ccc06b19e54f49d88b7f8cba4a68517f20806bd81ef6f94e06",
+    "bytes": 10805372
+  },
+  {
+    "path": "models/game-small/GAME-1.0.3-small-onnx/estimator.onnx",
+    "sha256": "a84738b2504472a1f22773cc6b0eccad1353a8f36229ad490b8fea85388bb5e1",
+    "bytes": 19335163
+  },
+  {
+    "path": "models/game-small/GAME-1.0.3-small-onnx/segmenter.onnx",
+    "sha256": "7724db4ba59a388fff5aba2f08f0ac025d4ca59caef80e7f474053a1455c88e5",
+    "bytes": 20906659
+  },
+  {
+    "path": "models/roformer/vocals_mel_band_roformer.yaml",
+    "sha256": "b958b29c8f7195f0d86bee6759a33980db675c4ecaf2fcaa80fa125828e6cd38",
+    "bytes": 944
+  },
+  {
+    "path": "models/lead-separation/config_bs_roformer_karaoke_frazer_becruily.yaml",
+    "sha256": "1d3b58b473025183d0d3c91e7a444cb5f1418d9f34e8f46b8d2fb10d2cc8ab34",
+    "bytes": 1903
+  },
+  {
+    "path": "bin/ffmpeg.exe",
+    "sha256": "c99c2bd005c8388f89bcb4ec8f481e9fcecee6316fa24647c03ebef46f1ee049",
+    "bytes": 102168576
+  },
+  {
+    "path": "models/roformer/download_checks.json",
+    "bytes": 28267,
+    "sha256": "d3622e1fa19c161d3cf704927711b453d593a3f1eb0f2e0838c3136907935151"
+  },
+  {
+    "path": "models/lead-separation/download_checks.json",
+    "bytes": 28267,
+    "sha256": "d3622e1fa19c161d3cf704927711b453d593a3f1eb0f2e0838c3136907935151"
+  }
+]

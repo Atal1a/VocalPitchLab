@@ -1,0 +1,41 @@
+[
+  {
+    "path": "rmvpe.pt",
+    "url": "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/e6d0c1a17da07c33557852f9dfa2bd44cc75737d/rmvpe.pt",
+    "sha256": "6d62215f4306e3ca278246188607209f09af3dc77ed4232efdd069798c4ec193",
+    "bytes": 181184272,
+    "license": "MIT metadata plus publisher research-only wording; scope requires clarification",
+    "redistribution": "unresolved",
+    "archive": false,
+    "license_evidence": "resources/license-evidence/rmvpe-publisher-terms.txt"
+  },
+  {
+    "path": "roformer/vocals_mel_band_roformer.ckpt",
+    "url": "https://huggingface.co/KimberleyJSN/melbandroformer/resolve/ac9b0614ab3cd7f77219e18ba494dfd93956c348/MelBandRoformer.ckpt",
+    "sha256": "87201f4d31afb5bc79993230fc49446918425574db48c01c405e44f365c7559e",
+    "bytes": 913106900,
+    "license": "MIT repository metadata",
+    "redistribution": "reviewed-metadata",
+    "archive": false
+  },
+  {
+    "path": "lead-separation/bs_roformer_karaoke_frazer_becruily.ckpt",
+    "url": "https://huggingface.co/becruily/bs-roformer-karaoke/resolve/f7849ae934209184dc288d1018cd8a76a7fc8b3c/bs_roformer_karaoke_frazer_becruily.ckpt",
+    "sha256": "eb90ee24c1154d83fbcfd27e96182f19e061557cc6e4746953125e08c29389f9",
+    "bytes": 204436907,
+    "license": "No explicit model license located",
+    "redistribution": "unresolved",
+    "archive": false
+  },
+  {
+    "path": "game-small",
+    "url": "https://github.com/openvpi/GAME/releases/download/v1.0.3/GAME-1.0.3-small-onnx.zip",
+    "sha256": "00ba0c64115b6b874d9ea4afd3e6cf822abda2a04e52569233b0a044fd40e4e8",
+    "bytes": 45676364,
+    "license": "CC-BY-NC-SA-4.0 (GAME 1.0 weights); code MIT",
+    "redistribution": "conditional-noncommercial",
+    "archive": true,
+    "license_source": "https://github.com/openvpi/GAME/releases/tag/v1.0.0",
+    "license_note": "v1.0.3 explicitly exports GAME 1.0 weights; retain attribution and terms, indicate ONNX export; commercial permission not granted"
+  }
+]

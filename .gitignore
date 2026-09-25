@@ -1,0 +1,14 @@
+work/
+build/
+dist/
+input/
+outputs/
+results/
+models/
+library/
+datasets/
+.venv/
+bin/
+__pycache__/
+*.pyc
+.env

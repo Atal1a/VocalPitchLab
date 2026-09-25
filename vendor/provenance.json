@@ -1,0 +1,16 @@
+{
+  "code_repository": "https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI",
+  "code_commit": "9f2f0559e6932c10c48642d404e7d2e771d9db43",
+  "original_code_sha256": "6dfe9b90bc2b283d20680d97129d1d0ec5d5af6d5323ece67d1b3623d95ee3de",
+  "local_code_sha256": "8fd0ec8262583756fb2fc5eadfc17ccb7f9fe5d85300aedd358be9ff6f6f931d",
+  "weight_url": "https://huggingface.co/lj1995/VoiceConversionWebUI/resolve/e6d0c1a17da07c33557852f9dfa2bd44cc75737d/rmvpe.pt",
+  "weight_revision": "e6d0c1a17da07c33557852f9dfa2bd44cc75737d",
+  "weight_sha256": "6d62215f4306e3ca278246188607209f09af3dc77ed4232efdd069798c4ec193",
+  "weight_publisher_license_metadata": "MIT (model repository card)",
+  "modifications": [
+    "Remove unused eager dependency on RVC JIT package; disallow use_jit",
+    "Load state_dict with weights_only=True",
+    "Normalize line endings"
+  ],
+  "note": "RVC-distributed RMVPE implementation/weights; not a claim of reproducing the original paper checkpoint."
+}

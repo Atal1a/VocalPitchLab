@@ -1,0 +1,15 @@
+{
+  "model": "fusion",
+  "crepe": {
+    "model": "crepe",
+    "threshold": 0.5,
+    "width": 3
+  },
+  "rmvpe": {
+    "model": "rmvpe",
+    "threshold": 0.4,
+    "width": 3
+  },
+  "weight": 0.5,
+  "primary": "rmvpe"
+}

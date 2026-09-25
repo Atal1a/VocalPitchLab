@@ -1,0 +1,9 @@
+[
+  {
+    "path": "audio_separator/separator/roformer/roformer_loader.py",
+    "original_sha256": "5731b005bb63612f74e31059eedfccb434543ca59b3899f16b62f4950e3f5b1f",
+    "patched_sha256": "c6698e5e12bdc498e7bc6d47b6ecaa760a0dc7b81ab81c54eb5a89a8572b54b4",
+    "old": "state_dict = torch.load(model_path, map_location=map_location)",
+    "new": "state_dict = torch.load(model_path, map_location=map_location, weights_only=True)"
+  }
+]
