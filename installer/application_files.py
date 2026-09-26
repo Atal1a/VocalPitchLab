@@ -5,5 +5,5 @@ MODULES = ['quick_app','app_paths','resource_policy','hardware_check','model_set
            'pitch_modes','pitch_experiments','analyze_song','lab','rmvpe_adapter',
            'benchmark_vocadito','prepare_game_notes','vocal_separator','separation_execution','separation_pool','hysteresis_experiment']
 RESOURCES = ['qml','assets','resources','note-settings.json','LICENSE',
-             'THIRD_PARTY_NOTICES.md','PERFORMANCE_PREVIEW.md']
+             'THIRD_PARTY_NOTICES.md']
 VENDOR = ['__init__.py','rmvpe_rvc.py','LICENSE-RVC','MODEL-CARD-RVC.md','provenance.json']

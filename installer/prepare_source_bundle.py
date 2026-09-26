@@ -8,7 +8,7 @@ OUT=ROOT/'work/github-source-1.1.0'
 
 def copy(src,dst):
     dst.parent.mkdir(parents=True,exist_ok=True)
-    if src.is_dir():shutil.copytree(src,dst,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+    if src.is_dir():shutil.copytree(src,dst,ignore=shutil.ignore_patterns('__pycache__','*.pyc','BRAND.md'))
     else:shutil.copy2(src,dst)
 
 def main():
@@ -17,8 +17,7 @@ def main():
     for name in MODULES:copy(ROOT/(name+'.py'),OUT/(name+'.py'))
     for name in ['assets','qml','installer','resources','note-settings.json','LICENSE',
                  'THIRD_PARTY_NOTICES.md','MODEL_LICENSE_REVIEW.md','INSTALLATION.md',
-                 'CHANGELOG.md','RELEASE_NOTES_1.1.0.md','RELEASE_1_1_QA.md','DEFAULT_PIPELINE.md','PIPELINE_REFINEMENT.md','LOCAL_REFINEMENT_QA.md','CLEAN_BUILD.md','WINDOWS_SANDBOX_QA.md',
-                 'PERFORMANCE_PREVIEW.md','PERFORMANCE_OPTIMIZATION.md','RELEASE_PLAN.md','RELEASE_READINESS.md','requirements.txt']:
+                 'CHANGELOG.md','RELEASE_NOTES_1.1.0.md','requirements.txt']:
         copy(ROOT/name,OUT/name)
     for name in VENDOR:copy(ROOT/'vendor'/name,OUT/'vendor'/name)
     (OUT/'.gitignore').write_text('work/\nbuild/\ndist/\ninput/\noutputs/\nresults/\nmodels/\nlibrary/\ndatasets/\n.venv/\nbin/\n__pycache__/\n*.pyc\n.env\n',encoding='utf-8')

@@ -12,7 +12,7 @@ def copy(src,dst):
 from application_files import MODULES
 modules=MODULES
 for name in modules:copy(ROOT/(name+'.py'),stage/(name+'.py'))
-for name in ['qml','assets','resources','note-settings.json','LICENSE','THIRD_PARTY_NOTICES.md','PERFORMANCE_PREVIEW.md','INSTALLATION.md']:copy(ROOT/name,stage/name)
+for name in ['qml','assets','resources','note-settings.json','LICENSE','THIRD_PARTY_NOTICES.md','INSTALLATION.md']:copy(ROOT/name,stage/name)
 copy(ROOT/'installer/launch.py',stage/'launch.py')
 for name in ['__init__.py','rmvpe_rvc.py','LICENSE-RVC','MODEL-CARD-RVC.md','provenance.json','separation-runtime']:
     copy(ROOT/'vendor'/name,stage/'vendor'/name)
