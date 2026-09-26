@@ -7,9 +7,7 @@ def prepare(song,model=None):
     path=cache_path(song)
     if path.exists():return path
     audio,sr=sf.read(song['audio']['vocals'],dtype='float32',always_2d=True)
-    previous=cache_path(song,'game-small-1.0.3-8steps-universal-v1')
-    if previous.is_file():notes=gate_silent_notes(json.loads(previous.read_text(encoding='utf8'))['notes'],audio,sr)
-    else:notes=(model or GameNotes()).transcribe(audio,sr)
+    notes=(model or GameNotes()).transcribe(audio,sr)
     assert all(0<=n['start']<n['end']<=len(audio)/sr+.001 for n in notes)
     assert all(a['end']<=b['start'] for a,b in zip(notes,notes[1:]))
     path.parent.mkdir(exist_ok=True,parents=True);temporary=path.with_suffix('.tmp')

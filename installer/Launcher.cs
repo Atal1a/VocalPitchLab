@@ -9,8 +9,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("VocalPitchLab desktop launcher")]
 [assembly: AssemblyCompany("VocalPitchLab")]
 [assembly: AssemblyCopyright("Copyright © 2026 VocalPitchLab contributors")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 internal static class Launcher
 {

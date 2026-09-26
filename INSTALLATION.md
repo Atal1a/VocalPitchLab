@@ -1,6 +1,6 @@
 # 安装与常见问题
 
-本文对应 VocalPitchLab 1.0.0 Windows x64 离线安装版本。安装完成后，通过开始菜单或桌面的 VocalPitchLab 启动，也可打开安装目录中的 VocalPitchLab.exe。
+本文对应 VocalPitchLab 1.1.0 Windows x64 离线安装版本。安装完成后，通过开始菜单或桌面的 VocalPitchLab 启动，也可打开安装目录中的 VocalPitchLab.exe。
 
 ## 安装
 
