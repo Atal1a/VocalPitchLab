@@ -8,7 +8,7 @@ from application_files import MODULES, RESOURCES, VENDOR
 from trim_runtime import trim
 
 ROOT = Path(__file__).resolve().parents[1]
-STAGE = ROOT / 'build/delivery-1.0.0'
+STAGE = ROOT / 'build/delivery-1.1.0'
 CLEAN = ROOT / 'work/repro-build/app'
 BASE = ROOT / 'build/slim-preview/runtime'
 
@@ -47,7 +47,7 @@ def main():
         if p.is_file():
             with p.open('rb') as f: digest=hashlib.file_digest(f,'sha256').hexdigest()
             files.append(dict(path=p.relative_to(STAGE).as_posix(),bytes=p.stat().st_size,sha256=digest))
-    (ROOT/'build/delivery-manifest.json').write_text(json.dumps(dict(version='1.0.0',
+    (ROOT/'build/delivery-manifest.json').write_text(json.dumps(dict(version='1.1.0',
         tests_run=False,code_signing=False,distribution_review='pending',
         runtime='CPython standalone base from earlier package; dependencies from clean rebuilt environment',
         files=files),indent=2),encoding='utf-8')

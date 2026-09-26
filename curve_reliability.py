@@ -3,6 +3,13 @@ import numpy as np
 from scipy.ndimage import median_filter
 
 VERSION='curve-reliability-pilot-v1'
+NOTE_EVIDENCE_VERSION='voicing-support-v1'
+
+def note_evidence(midi,crepe_score,rmvpe_score):
+    """Unsmooth voicing support, independent of visual opacity (not probability)."""
+    if not len(midi):return np.array([],dtype=float)
+    supported=mask(midi,crepe_score,rmvpe_score,'hysteresis')
+    return np.where(supported,1.,0.)
 
 def display_weight(midi,crepe_score,rmvpe_score):
     """Conservative visual emphasis; no pitch samples are removed."""

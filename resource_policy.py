@@ -7,11 +7,13 @@ def cpu_fallback():
     import json
     print('VPL_EVENT '+json.dumps(dict(computeStatus='显存不足，部分阶段使用 CPU，分析较慢'),ensure_ascii=False),flush=True)
 
-def hardware():
+def hardware(replay=False):
     global _hardware
     if _hardware is None:
         from hardware_check import probe
         _hardware=probe()
+        replay=True
+    if replay:
         import json
         status='GPU 加速' if _hardware['device']=='cuda' else 'CPU 分析较慢：'+_hardware['reason']
         print('VPL_EVENT '+json.dumps(dict(hardware=_hardware,computeStatus=status),ensure_ascii=False),flush=True)
@@ -43,3 +45,17 @@ def separation_segments(dev):
     import torch
     free,_=torch.cuda.mem_get_info()
     return [None,512,256] if free>=8*1024**3 else [512,256]
+
+def overlap_game(dev,duration,available_bytes=None,cpu_count=None):
+    """Allow one CPU note worker beside GPU pitch inference on roomy hosts."""
+    if dev!='cuda' or ((os.cpu_count() or 1) if cpu_count is None else cpu_count)<8:return False
+    if available_bytes is None:
+        if os.name!='nt':return False
+        import ctypes
+        class MemoryStatus(ctypes.Structure):
+            _fields_=[('length',ctypes.c_ulong),('load',ctypes.c_ulong)]+[(name,ctypes.c_ulonglong) for name in
+                ['total_phys','avail_phys','total_page','avail_page','total_virtual','avail_virtual','extended']]
+        status=MemoryStatus();status.length=ctypes.sizeof(status)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):return False
+        available_bytes=status.avail_phys
+    return available_bytes>=8*1024**3+4*duration*44100*2*4

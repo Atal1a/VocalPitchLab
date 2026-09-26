@@ -17,6 +17,11 @@ ApplicationWindow {
     property real loopViewStart: 0
     property real loopViewEnd: 20
     property bool loopOverview: false
+    function pitchLabel(value) {
+        const key=Math.round(value)
+        const cents=Math.round((value-key)*100)
+        return ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"][((key%12)+12)%12]+(Math.floor(key/12)-1)+(cents ? " " + (cents>0 ? "+" : "") + cents + "¢" : "")
+    }
     font.family: "Microsoft YaHei"
     function focusLoop() {
         loopOverview = false
@@ -116,11 +121,39 @@ ApplicationWindow {
             RowLayout {
                 Layout.topMargin: 7; Layout.bottomMargin: 5
                 Text { text: s.loaded ? s.title : "歌曲库"; color: Theme.text; font.pixelSize: 27; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                Choice { objectName: "timeChoice"; enabled: s.loaded; Layout.preferredWidth: 94; model: ["5 秒","10 秒","20 秒","40 秒","60 秒","整首"]; currentIndex: 2; displayText: s.span === 0 ? "整首" : Math.round(s.span) + " 秒"; onActivated: backend.setSpan([5,10,20,40,60,0][currentIndex]) }
-                AppButton { text: "＋"; enabled: s.loaded; tip: "放大音域 · Alt + 滚轮"; onClicked: backend.pitchZoom(.8) }
-                AppButton { text: "−"; enabled: s.loaded; tip: "缩小音域"; onClicked: backend.pitchZoom(1.25) }
-                AppButton { text: "↑"; enabled: s.loaded; tip: "音域上移"; onClicked: backend.pitchMove(2) }
-                AppButton { text: "↓"; enabled: s.loaded; tip: "音域下移"; onClicked: backend.pitchMove(-2) }
+                Rectangle {
+                    objectName: "viewControlsPanel"
+                    Layout.preferredWidth: 340; implicitHeight: 82; radius: 15
+                    gradient: Gradient {
+                        GradientStop { position: 0; color: Theme.dark ? "#ed303238" : "#faffffff" }
+                        GradientStop { position: 1; color: Theme.dark ? "#ed26282d" : "#eaf7f8fa" }
+                    }
+                    border.color: Theme.dark ? "#474a51" : "#e0e3e9"; border.width: .7
+                    ColumnLayout {
+                        anchors.fill: parent; anchors.margins: 6; spacing: 2
+                        RowLayout {
+                            spacing: 2
+                            ViewControl { objectName: "timeControl"; enabled: s.loaded; label: "时间"; valueText: s.span===0 ? "整首" : Number(s.span.toFixed(1))+" 秒"; onAdjusted: function(steps) { backend.adjustView("time",steps) } }
+                            Rectangle { implicitWidth: 1; implicitHeight: 24; color: Theme.line }
+                        ViewControl { objectName: "pitchWidthControl"; enabled: s.loaded; label: "音域跨度"; valueText: Math.abs((s.high-s.low)%12)<.001 ? Math.round((s.high-s.low)/12)+" 八度" : Number((s.high-s.low).toFixed(1))+" 半音"; onAdjusted: function(steps) { backend.adjustView("width",steps) } }
+                            Rectangle { implicitWidth: 1; implicitHeight: 24; color: Theme.line }
+                        ViewControl { objectName: "pitchCenterControl"; enabled: s.loaded; label: "音域中心"; valueText: win.pitchLabel((s.low+s.high)/2); onAdjusted: function(steps) { backend.adjustView("center",steps) } }
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true; Layout.leftMargin: 6; Layout.rightMargin: 8
+                            Button {
+                                objectName: "overviewButton"; enabled: s.loaded; text: "整首"; implicitWidth: 48; implicitHeight: 22; hoverEnabled: true
+                                onClicked: backend.toggleOverview()
+                                ToolTip.visible: hovered; ToolTip.delay: 650; ToolTip.text: s.span===0 ? "恢复时间跨度" : "显示整首"
+                                contentItem: Text { text: parent.text; color: s.span===0 ? Theme.accent : Theme.muted; font.pixelSize: 10; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                background: Rectangle { radius: 6; color: s.span===0 ? Theme.selected : parent.hovered ? Theme.hover : "transparent"; Behavior on color { ColorAnimation { duration: 140 } } }
+                            }
+                            Item { Layout.fillWidth: true }
+                            AppButton { objectName: "adaptPitchButton"; enabled: s.loaded; text: "自适应"; implicitHeight: 22; onClicked: backend.adaptPitchRange() }
+                            Text { text: s.loaded ? win.pitchLabel(s.low)+" – "+win.pitchLabel(s.high) : "—"; color: Theme.muted; font.pixelSize: 10 }
+                        }
+                    }
+                }
             }
             Rectangle {
                 objectName: "analysisCard"; visible: s.running || s.canRetry; Layout.fillWidth: true; implicitHeight: 92; color: Theme.panel; radius: 16; border.color: Theme.line; border.width: .6
@@ -164,17 +197,39 @@ ApplicationWindow {
                         AppButton { objectName: "playButton"; text: s.playing ? "暂停" : "播放"; primary: true; tip: "空格"; onClicked: backend.togglePlay() }
                         AppButton { text: "−5s"; onClicked: backend.seek(s.position - 5) }
                         AppButton { text: "+5s"; onClicked: backend.seek(s.position + 5) }
-                        TrackSlider { objectName: "seekBar"; Layout.fillWidth: true; from: 0; to: s.duration; value: s.position; onMoved: backend.seek(value)
+                        TrackSlider { id: seekBar; objectName: "seekBar"; Layout.fillWidth: true; from: 0; to: s.duration; value: s.position; onMoved: backend.seek(value)
+                            HoverHandler { id: seekHover }
+                            readonly property real previewFraction: Math.max(0, Math.min(1, (seekHover.point.position.x - leftPadding - handle.width / 2) / Math.max(1, availableWidth - handle.width)))
+                            readonly property real previewSeconds: from + previewFraction * (to - from)
+                            ToolTip {
+                                id: seekPreview
+                                objectName: "seekPreview"
+                                visible: seekHover.hovered && s.loaded && seekBar.to > 0
+                                x: Math.max(0, Math.min(seekBar.width - width, seekHover.point.position.x - width / 2))
+                                y: -height - 6
+                                text: {
+                                    const seconds = Math.floor(seekBar.previewSeconds)
+                                    return Math.floor(seconds / 60).toString().padStart(2, "0") + ":" + (seconds % 60).toString().padStart(2, "0")
+                                }
+                                contentItem: Text { text: seekPreview.text; color: Theme.text; font.pixelSize: 12 }
+                                background: Rectangle { radius: 8; color: Theme.panel; border.color: Theme.line }
+                            }
                             WheelHandler { onWheel: function(event) { backend.wheel(event.angleDelta.y / 120, event.modifiers); event.accepted = true } }
                         }
                         Text { text: s.time + " / " + s.total; color: Theme.muted; font.pixelSize: 12 }
                     }
                     RowLayout {
-                        Choice { model: ["分离人声","原曲"]; currentIndex: s.source === "vocals" ? 0 : 1; onActivated: backend.setSource(currentIndex === 0 ? "vocals" : "original") }
-                        AppButton { objectName: "loopButton"; text: s.loop ? "循环中" : "循环"; tip: "也可在图上拖动框选循环范围"; primary: s.loop; onClicked: { if (!loopEditor) { backend.prepareLoop(); focusLoop() } loopEditor = !loopEditor } }
+                        AppButton { objectName: "audioSourceChoice"; text: s.source === "vocals" ? "分离人声" : "原曲"; onClicked: backend.setSource(s.source === "vocals" ? "original" : "vocals") }
+                        AppButton {
+                            id: songHarmony; objectName: "songHarmonyChoice"
+                            enabled: s.loaded && !s.songSeparationBusy
+                            text: s.songSeparationBusy ? "和声分离 · 处理中" : (s.activeSeparation === "mel_bs" ? "和声分离：开" : "和声分离：关")
+                            onClicked: backend.setSongHarmony(s.activeSeparation !== "mel_bs")
+                        }
+                        AppButton { objectName: "loopButton"; text: s.loop ? "循环中" : "循环"; primary: s.loop; onClicked: { if (!loopEditor) { backend.prepareLoop(); focusLoop() } loopEditor = !loopEditor } }
                         Item { Layout.fillWidth: true }
                         AppButton { objectName: "muteButton"; text: s.muted ? "静音" : "音量"; tip: "歌曲音量与静音；钢琴试听独立播放"; onClicked: backend.toggleMute() }
-                        TrackSlider { objectName: "volumeBar"; Layout.preferredWidth: 110; from: 0; to: 1; value: s.volume; onMoved: backend.setVolume(value) }
+                        TrackSlider { objectName: "volumeBar"; Layout.preferredWidth: 110; from: 0; to: 1; value: s.muted ? 0 : s.volume; onMoved: backend.setVolume(value) }
                         Text { text: s.muted ? "0%" : Math.round(s.volume * 100) + "%"; color: Theme.muted; font.pixelSize: 11; Layout.preferredWidth: 32 }
                     }
                     ColumnLayout {
@@ -219,16 +274,6 @@ ApplicationWindow {
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                 ColumnLayout { id: settingsContent; objectName: "settingsContent"; width: settingsScroll.availableWidth; spacing: 16
                     Rectangle {
-                        Layout.fillWidth: true; implicitHeight: 204; radius: 16; color: Theme.control
-                        ColumnLayout { anchors.fill: parent; anchors.margins: 14; spacing: 9
-                            Text { text: "人声分离"; color: Theme.muted; font.pixelSize: 11 }
-                            SettingRow { objectName: "harmonySeparation"; Layout.fillWidth: true; title: "和声分离"; checked: s.settings.separationModel === "mel_bs"; enabled: !s.running; onToggled: function(value) { backend.setting("separationModel",value ? "mel_bs" : "mel_roformer") } }
-                            Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; text: "如果演唱声部缺失，请关闭和声分离。"; color: Theme.muted; font.pixelSize: 12 }
-                            Text { text: s.loaded ? "当前歌曲：" + (s.activeSeparation === "mel_bs" ? "已分离和声" : "未分离和声") : "用于新导入的歌曲"; color: Theme.muted; font.pixelSize: 11 }
-                            AppButton { objectName: "applySeparation"; Layout.fillWidth: true; text: s.loaded && s.activeSeparation === s.settings.separationModel ? "已应用" : (s.separationCached ? "切换当前歌曲" : "重新分析当前歌曲"); enabled: s.loaded && !s.running && s.activeSeparation !== s.settings.separationModel; onClicked: backend.applySeparation() }
-                        }
-                    }
-                    Rectangle {
                         Layout.fillWidth: true; implicitHeight: 90; radius: 16; color: Theme.control
                         ColumnLayout { anchors.fill: parent; anchors.margins: 16; spacing: 12
                             Text { text: "钢琴试听音量"; color: Theme.text; font.pixelSize: 13 }
@@ -250,19 +295,17 @@ ApplicationWindow {
                 }
             }
             Rectangle {
-                Layout.fillWidth: true; implicitHeight: 154; radius: 16; color: Theme.control
-                ColumnLayout { anchors.fill: parent; anchors.margins: 16; spacing: 0
-                    Text { text: "图表图层"; color: Theme.muted; font.pixelSize: 11 }
-                    SettingRow { Layout.fillWidth: true; title: "主要音符"; detail: "以音符块为主要阅读对象"; checked: s.settings.blocks; onToggled: function(value) { backend.setting("blocks",value) } }
-                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.line }
-                    SettingRow { Layout.fillWidth: true; title: "细节曲线"; checked: s.settings.curve; onToggled: function(value) { backend.setting("curve",value) } }
-                }
-            }
-            Rectangle {
                 objectName: "pitchHintsCard"; Layout.fillWidth: true; implicitHeight: pitchHintsContent.implicitHeight + 32; radius: 16; color: Theme.control
                 ColumnLayout { id: pitchHintsContent; anchors.fill: parent; anchors.margins: 16; spacing: 0
-                    Text { text: "音高提示"; color: Theme.muted; font.pixelSize: 11 }
+                    Text { text: "功能选项"; color: Theme.muted; font.pixelSize: 11 }
+                    SettingRow { objectName: "harmonySeparation"; Layout.fillWidth: true; title: "默认分离和声"; checked: s.settings.separationModel === "mel_bs"; onToggled: function(value) { backend.setting("separationModel",value ? "mel_bs" : "mel_roformer") } }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.line }
+                    SettingRow { Layout.fillWidth: true; title: "主要音符"; checked: s.settings.blocks; onToggled: function(value) { backend.setting("blocks",value) } }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.line }
+                    SettingRow { Layout.fillWidth: true; title: "细节曲线"; checked: s.settings.curve; onToggled: function(value) { backend.setting("curve",value) } }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.line }
                     SettingRow { Layout.fillWidth: true; title: "弱化不可靠曲线"; checked: s.settings.cleanCurve; onToggled: function(value) { backend.setting("cleanCurve",value) } }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.line }
                     SettingRow { objectName: "hoverToggle"; Layout.fillWidth: true; title: "悬浮高亮与对齐线"; checked: s.settings.hoverNotes; onToggled: function(value) { backend.setting("hoverNotes",value) } }
                     Rectangle { Layout.fillWidth: true; height: 1; color: Theme.line }
                     SettingRow { objectName: "liveNotesToggle"; Layout.fillWidth: true; title: "播放线旁的主音高"; checked: s.settings.liveNotes; onToggled: function(value) { backend.setting("liveNotes",value) } }

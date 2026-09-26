@@ -2,7 +2,7 @@
   #error StageDir must point to a prepared application directory
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.1.0"
 #endif
 [Setup]
 ; Preserve installation identity so earlier local versions upgrade in place.
@@ -33,7 +33,11 @@ UninstallDisplayIcon={app}\assets\vocalpitch.ico
 LicenseFile=..\LICENSE
 WizardStyle=modern
 DisableProgramGroupPage=yes
-CloseApplications=no
+UsePreviousAppDir=yes
+UsePreviousTasks=yes
+CloseApplications=yes
+CloseApplicationsFilter=*.exe,*.dll,*.pyd
+RestartApplications=no
 [Tasks]
 Name: "desktopicon"; Description: "Create desktop shortcut"; Flags: unchecked
 [Files]

@@ -7,9 +7,10 @@ Item {
     property bool checked: false
     signal toggled(bool value)
     implicitHeight: detail.length ? 62 : 50
+    opacity: enabled ? 1 : .4
     Column { anchors.left: parent.left; anchors.right: toggle.left; anchors.rightMargin: 20; anchors.verticalCenter: parent.verticalCenter; spacing: 4
-        Text { text: row.title; font.pixelSize: 13; color: Theme.text }
-        Text { visible: row.detail.length > 0; text: row.detail; font.pixelSize: 11; color: Theme.muted }
+        Text { width: parent.width; text: row.title; font.pixelSize: 13; color: Theme.text; elide: Text.ElideRight }
+        Text { width: parent.width; visible: row.detail.length > 0; text: row.detail; font.pixelSize: 11; color: Theme.muted; elide: Text.ElideRight }
     }
     Switch {
         id: toggle; objectName: row.objectName + "Switch"; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; checked: row.checked; onClicked: row.toggled(checked); padding: 0

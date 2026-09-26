@@ -48,7 +48,8 @@ class Controller(QObject):
         for song in self.data['songs']:song.setdefault('song_id',uuid.uuid4().hex)
         for job in self.data['jobs']:
             if job['state'] in ['running','queued']:job.update(state='interrupted',message='上次分析已中断，可重试')
-        self.process=None;self.active=None;self.display_job=None;self.buffer='';self.worker=Path(worker or ROOT/'analyze_song.py')
+        self.presentation_process=None;self.presentation_queue=[];self.presentation_active=None;self.closing=False
+        self.process=None;self.active=None;self.display_job=None;self.buffer='';self.worker=Path(worker or ROOT/'analyze_song.py');self.reusable_worker=self.worker.resolve()==(ROOT/'analyze_song.py').resolve();self.worker_closing=False
         self.settings.setdefault('cleanCurve',True)
         self.curve_reliability={}
         self.song=None;self.selected=-1;self.series={};self.loudness=(np.array([0.]),np.array([.5]));self.notes=[];self.compare=set();self.message='选择或拖入歌曲，开始分析。'
@@ -77,7 +78,7 @@ class Controller(QObject):
         if signature!=getattr(self,'library_signature',None):
             self.library_signature=signature;self.libraryChanged.emit()
     def remember_view(self):
-        if self.song:self.song['view']=dict(position=self.t,span=self.span,low=self.low,high=self.high,source=self.source)
+        if self.song:self.song['view']=dict(position=self.t,span=self.span,low=self.low,high=self.high,source=self.source,detailSpan=getattr(self,'detail_span',20.))
     def persist_view(self):
         if self.song:
             before=self.song.get('view');self.remember_view()
@@ -119,6 +120,7 @@ class Controller(QObject):
           highQualityAvailable=self.high_quality_available,
           activeSeparation=self.song.get('algorithm',{}).get('separation','htdemucs') if self.song else '',
           separationCached=bool(self.song and self.settings['separationModel'] in self.song.get('analysis_versions',{})),
+          songSeparationBusy=bool(self.song and any(j.get('target_id')==self.song.get('song_id') and j['state'] in ['queued','running'] for j in self.data['jobs'])),
           activeNoteMode='game' if self.settings['noteMode']=='game' and getattr(self,'game_notes_available',False) else 'classic',
           activePitchModel=next((k for k,v in PITCH_MODES.items() if v==getattr(self,'primary',None)),self.settings['pitchModel']),
           dark=self.settings['theme']=='dark' or (self.settings['theme']=='system' and QGuiApplication.styleHints().colorScheme()==Qt.ColorScheme.Dark),
@@ -131,10 +133,17 @@ class Controller(QObject):
         self.output.setVolume(self.settings['volume']);self.vocal_output.setVolume(min(1,self.settings['volume']*self.vocal_boost))
         self.output.setMuted(self.muted or self.source!='original');self.vocal_output.setMuted(self.muted or self.source!='vocals')
     def vocal_ready(self,status):
+        if status==QMediaPlayer.MediaStatus.BufferedMedia and getattr(self,'vocal_buffer_pending',False):
+            self.vocal_buffer_pending=False;song=self.audio_song
+            QTimer.singleShot(50,lambda:self.vocal_player.setPosition(self.player.position()) if not self.closing and self.audio_song is song else None)
         if not self.changing and self.vocal_pending and status in [QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia]:
             self.vocal_pending=False
-            self.vocal_player.setPosition(self.player.position())
-            if self.state_playing():self.vocal_player.play()
+            song=self.audio_song
+            def start():
+                if self.closing or self.audio_song is not song:return
+                self.vocal_player.setPosition(self.player.position())
+                if self.state_playing():self.vocal_player.play()
+            QTimer.singleShot(0,start)
     @Slot(int)
     def previewPiano(self,midi):
         if not 21<=midi<=108:return
@@ -185,7 +194,9 @@ class Controller(QObject):
         self.settings[key]=value;self.show_blocks=self.settings['blocks'];self.show_curve=self.settings['curve'];self.save();self.changed.emit()
     @Slot(float)
     def setVolume(self,value):
-        self.settings['volume']=float(np.clip(value,0,1));self.apply_audio();self.save();self.changed.emit()
+        self.settings['volume']=float(np.clip(value,0,1))
+        if self.settings['volume']>0:self.muted=False
+        self.apply_audio();self.save();self.changed.emit()
     @Slot(float)
     def setPianoVolume(self,value):
         self.settings['pianoVolume']=float(np.clip(value,0,1))
@@ -248,87 +259,131 @@ class Controller(QObject):
         if not 0<=index<len(self.data['songs']):return
         if self.song is self.data['songs'][index]:return
         self.remember_view()
-        self.changing=True;self.player.stop();self.vocal_player.stop();self.changing=False
+        if not getattr(self,'analysis_swap',False):
+            self.changing=True;self.player.stop();self.vocal_player.stop();self.changing=False
         song=self.data['songs'][index]
         try:
-            series={};scores={}
+            series={}
             curves=dict(song['curves'])
             from pitch_experiments import result_folder
             experiment=result_folder(song)
             for k in ['rmvpe_tracked','fcpe']:
-                if (experiment/'report.json').is_file() and (experiment/(k+'.csv')).is_file():curves[k]=str(experiment/(k+'.csv'))
-            for k,p in curves.items():
-                if k not in LABELS:continue
-                rows=list(csv.DictReader(Path(p).open(encoding='utf-8-sig')))
-                series[k]=(np.array([float(r['time_seconds']) for r in rows]),np.array([float(r['midi_float']) if r['midi_float'] else np.nan for r in rows]))
-                scores[k]=np.array([float(r.get('rmvpe_max_salience',r.get('periodicity_or_probability',0))) for r in rows])
+                if k not in curves and (experiment/'report.json').is_file() and (experiment/(k+'.csv')).is_file():curves[k]=str(experiment/(k+'.csv'))
             for p in song['audio'].values():
                 if not Path(p).is_file():raise FileNotFoundError(p)
-            primary='tuned_vocals' if 'tuned_vocals' in series else 'rmvpe_vocals'
-            if all(k in series for k in ['tuned_vocals','crepe_full','rmvpe_vocals']):
-                from pitch_modes import recover_gaps
-                from benchmark_vocadito import smooth
-                n=min(len(series[k][1]) for k in ['tuned_vocals','crepe_full','rmvpe_vocals'])
-                base=series['tuned_vocals'][1].copy()
-                c=series['crepe_full'][1][:n].copy();r=series['rmvpe_vocals'][1][:n].copy()
-                c[scores['crepe_full'][:n]<.5]=np.nan;r[scores['rmvpe_vocals'][:n]<.03]=np.nan
-                base[:n]=recover_gaps(base[:n],smooth(c,3),smooth(r,3),scores['crepe_full'][:n],scores['rmvpe_vocals'][:n])
-                series['tuned_vocals']=(series['tuned_vocals'][0],base)
-            if song.get('main_notes'):notes=json.loads(Path(song['main_notes']).read_text(encoding='utf-8'))['notes']
-            else:
-                from main_notes import extract
-                notes=extract(*series[primary])
+            primary=next(k for k in ['rmvpe_tracked','rmvpe_vocals','tuned_vocals','crepe_full'] if k in curves and Path(curves[k]).is_file())
+            from presentation_results import read_curve
+            times,values,_=read_curve(curves[primary])
+            if not len(times):raise ValueError('Empty pitch timeline')
+            series[primary]=(times,values)
+            notes=[]
+            if song.get('main_notes') and Path(song['main_notes']).is_file():
+                notes=json.loads(Path(song['main_notes']).read_text(encoding='utf-8'))['notes']
         except Exception:
             self.feedback('这份结果的文件不完整，请选择其他歌曲或重新分析。');return
-        self.song=song;self.selected=index;self.series=series;self.primary=primary;self.notes=notes;self.compare=set();self.t=0.;self.loop=False;self.window_index=0
-        self.curve_reliability={}
-        if 'crepe_full' in scores and 'rmvpe_vocals' in scores:
-            from curve_reliability import display_weight
-            for key in ['rmvpe_tracked','rmvpe_vocals']:
-                if key not in series:continue
-                times,values=series[key]
-                c=np.interp(times,series['crepe_full'][0],scores['crepe_full'])
-                r=np.interp(times,series['rmvpe_vocals'][0],scores['rmvpe_vocals'])
-                self.curve_reliability[key]=(times,display_weight(values,c,r))
-        self.mode_notes={}
-        from game_notes import cache_path
-        self.game_notes_available=False;self.game_notes=[];self.game_mode_notes={}
+        self.song=song;self.selected=index;self.series=series;self.curve_paths=curves;self.primary=primary;self.notes=notes;self.compare=set();self.t=0.;self.loop=False;self.window_index=0
+        self.curve_reliability={};self.mode_notes={primary:notes};self.note_onsets=None
+        self.game_notes_available=False;self.game_notes=[];self.game_mode_notes={};self.prepared_primary=None
+        self.loudness=(np.array([0.]),np.array([.5]));refresh=False
         try:
-            path=cache_path(song)
-            if path.is_file():
-                self.game_notes=json.loads(path.read_text(encoding='utf8'))['notes'];self.game_notes_available=True
-        except (OSError,ValueError,KeyError):pass
-        from main_notes import audio_onsets,current_settings
-        import soundfile as sf
-        settings=current_settings()
-        audio,sr=sf.read(song['audio']['vocals'],dtype='float32',always_2d=True)
-        self.note_onsets=audio_onsets(audio,sr,settings['onset_prominence_db']) if settings.get('onset_prominence_db') else None
+            self.install_presentation(song.get('presentation',{}))
+        except (OSError,ValueError,KeyError,TypeError):
+            refresh=True
+            # Retain the old cached blocks while a separate worker refreshes.
+            from game_notes import display_cache_path
+            try:
+                path=display_cache_path(song)
+                if path.is_file():
+                    self.game_notes=json.loads(path.read_text(encoding='utf-8'))['notes']
+                    self.game_notes_available=True
+                    self.game_mode_notes[primary]=self.game_notes
+            except (OSError,ValueError,KeyError):pass
         self.apply_pitch_model()
-        try:self.loudness=vocal_loudness(song['audio']['vocals'],DATA_ROOT/'work/display-loudness')
-        except (OSError,ValueError,RuntimeError):self.loudness=(np.array([0.]),np.array([.5]))
+        if refresh:self.queue_presentation(dict(song,curves=curves),song['curves'].get('rmvpe_tracked'))
         self.loop_a=0.;self.loop_b=min(10,song['duration']);self.loop_initialized=False;self.anchor_t=0.;self.clock_anchor.restart()
         self.data['last_song']=index;self.save();self.contentChanged.emit()
         self.message=''
         view=song.get('view',{})
         self.span=float(np.clip(view.get('span',20),0,300));self.t=float(np.clip(view.get('position',0),0,song['duration']))
+        self.detail_span=self.clamp_span(view.get('detailSpan',self.span or 20))
+        if self.span:self.span=self.clamp_span(self.span)
         self.source=view.get('source','vocals') if view.get('source','vocals') in song['audio'] else 'vocals'
         self.fitRange()
         if view.get('high',0)>view.get('low',0):self.low=float(view['low']);self.high=float(view['high'])
+        self.setPitchWidth(self.high-self.low)
         self.readout_time=-1.;self.readout_pitch='—';self.preview_note=None
         self.presentation.reset(self.t,time.monotonic());self.setSource(self.source);self.changed.emit()
 
+    def install_presentation(self,value):
+        from presentation_results import load
+        notes,evidence,loudness=load(value)
+        primary=value['primary']
+        if primary not in self.series:raise ValueError('Missing primary curve')
+        if len(evidence[0])!=len(self.series[primary][0]) or not np.allclose(evidence[0],self.series[primary][0],atol=1e-6):
+            raise ValueError('Presentation no longer matches curve')
+        self.prepared_primary=primary;self.mode_notes[primary]=notes
+        self.curve_reliability[primary]=evidence;self.loudness=loudness
+        self.game_notes_available=value.get('game_available',False)
+        self.game_mode_notes[primary]=notes
+        self.vocal_boost=float(value.get('gain',1.))
+
+    def queue_presentation(self,song,native_curve):
+        token=(song['song_id'],song['audio']['vocals'],native_curve)
+        if self.presentation_active and self.presentation_active[0]==token:return
+        if any(t==token for t,_ in self.presentation_queue):return
+        self.presentation_queue.append((token,json.loads(json.dumps(song))))
+        self.start_presentation()
+
+    def start_presentation(self):
+        if self.closing or self.presentation_process or not self.presentation_queue:return
+        token,song=self.presentation_queue.pop(0);self.presentation_active=(token,song)
+        folder=DATA_ROOT/'work'/'presentation-jobs';folder.mkdir(parents=True,exist_ok=True)
+        job=uuid.uuid4().hex;source=folder/(job+'-input.json');target=folder/(job+'-result.json')
+        write_json(source,song)
+        process=QProcess(self);self.presentation_process=process
+        process.setWorkingDirectory(str(ROOT))
+        process.setStandardOutputFile(str(folder/(job+'.log')))
+        process.setStandardErrorFile(str(folder/(job+'-error.log')))
+        process.finished.connect(lambda code,*args:self.presentation_finished(process,token,target,code))
+        process.errorOccurred.connect(lambda e:self.presentation_finished(process,token,target,-1) if e==QProcess.ProcessError.FailedToStart else None)
+        process.start(worker_python(),['-u',str(ROOT/'presentation_results.py'),'--song-file',str(source),'--result-file',str(target)])
+
+    def presentation_finished(self,process,token,target,code):
+        if self.presentation_process is not process:return
+        self.presentation_process=None;self.presentation_active=None;process.deleteLater()
+        if not self.closing and code==0:
+            song=next((s for s in self.data['songs'] if
+                       (s['song_id'],s['audio']['vocals'],s['curves'].get('rmvpe_tracked'))==token),None)
+            if song:
+                try:
+                    from presentation_results import load
+                    value=json.loads(target.read_text(encoding='utf-8'));load(value)
+                    if self.song is song:
+                        self.install_presentation(value);self.apply_pitch_model();self.apply_audio()
+                    song['presentation']=value;song['main_notes']=value['notes']
+                    self.save()
+                except (OSError,ValueError,KeyError,TypeError):
+                    if self.song is song:self.feedback('音符整理未完成，暂时显示原有结果。')
+        elif not self.closing and self.song and self.song['song_id']==token[0]:
+            self.feedback('音符整理未完成，暂时显示原有结果。')
+        self.start_presentation()
+
+    def ensure_series(self,key):
+        if key not in self.series and key in getattr(self,'curve_paths',{}):
+            from presentation_results import read_curve
+            times,values,_=read_curve(self.curve_paths[key])
+            self.series[key]=(times,values)
+
     def apply_pitch_model(self):
-        key=PITCH_MODES.get(self.settings['pitchModel'],'tuned_vocals')
-        if key not in self.series:key='tuned_vocals' if 'tuned_vocals' in self.series else next(iter(self.series))
+        key=PITCH_MODES.get(self.settings['pitchModel'],'rmvpe_tracked')
+        self.ensure_series(key)
+        if key not in self.series:key=next(k for k in ['rmvpe_tracked','rmvpe_vocals','tuned_vocals','crepe_full'] if k in self.series)
         if key not in self.mode_notes:
+            # Only explicit legacy/experimental modes compute on demand.
             from main_notes import extract
             self.mode_notes[key]=extract(*self.series[key],onset_times=self.note_onsets)
         self.primary=key;self.notes=self.mode_notes[key];self.compare=set()
-        if self.settings['noteMode']=='game' and self.game_notes_available:
-            if key not in self.game_mode_notes:
-                from game_notes import reconcile_notes
-                evidence=self.curve_reliability.get(key)
-                self.game_mode_notes[key]=reconcile_notes(self.game_notes,*self.series[key],reliability=evidence[1] if evidence is not None else None)
+        if self.settings['noteMode']=='game' and key in self.game_mode_notes:
             self.notes=self.game_mode_notes[key]
         self.readout_time=-1.;self.readout_pitch='—';self.revision+=1
         self.contentChanged.emit();self.changed.emit()
@@ -352,17 +407,64 @@ class Controller(QObject):
     def setAutoRange(self,on):self.auto=on;self.fitRange() if on else self.changed.emit()
     @Slot(float)
     def pitchZoom(self,factor):
-        self.auto=False;middle=(self.low+self.high)/2;width=float(np.clip((self.high-self.low)*factor,8,60));self.low=middle-width/2;self.high=middle+width/2;self.changed.emit()
+        self.setPitchWidth((self.high-self.low)*factor)
     @Slot(float)
-    def pitchMove(self,delta):self.auto=False;self.low+=delta;self.high+=delta;self.changed.emit()
+    def pitchMove(self,delta):self.setPitchCenter((self.low+self.high)/2+delta)
     @Slot(float)
-    def setSpan(self,value):self.span=value;self.fitRange() if self.auto else self.changed.emit()
+    def setPitchWidth(self,width):
+        center=float(np.clip((self.low+self.high)/2,4,123))
+        width=float(np.clip(width,8,min(60,2*center,2*(127-center))))
+        self.auto=False;self.low=center-width/2;self.high=center+width/2;self.changed.emit()
+    @Slot(float)
+    def setPitchCenter(self,center):
+        width=float(np.clip(self.high-self.low,8,60));center=float(np.clip(center,width/2,127-width/2))
+        self.auto=False;self.low=center-width/2;self.high=center+width/2;self.changed.emit()
+    def clamp_span(self,value):
+        maximum=min(300.,self.song['duration']) if self.song else 300.
+        return float(np.clip(value,min(3.,maximum),maximum))
+    @Slot(float)
+    def setSpan(self,value):
+        self.auto=False
+        if value==0:
+            if self.span:self.detail_span=self.span
+            self.span=0.
+        else:self.span=self.clamp_span(value);self.detail_span=self.span
+        self.changed.emit()
+    @Slot()
+    def adaptPitchRange(self):
+        if not self.song or not self.series:return
+        times,values=self.series[self.primary]
+        mask=(times>=self.t)&np.isfinite(values)&(values>=0)&(values<=127)
+        # Use most of the remaining performance, rather than a transient frame.
+        pitches=values[mask]
+        if len(pitches)<30:pitches=values[np.isfinite(values)&(values>=0)&(values<=127)]
+        if not len(pitches):return
+        low,high=np.quantile(pitches,[.05,.95])
+        width=float(np.clip(np.ceil(high+2)-np.floor(low-2),12,60))
+        center=float(np.clip((np.floor(low-2)+np.ceil(high+2))/2,width/2,127-width/2))
+        self.auto=False;self.low=center-width/2;self.high=center+width/2;self.changed.emit()
+    @Slot()
+    def toggleOverview(self):self.setSpan(getattr(self,'detail_span',20.) if self.span==0 else 0.)
+    @Slot(str,int)
+    def adjustView(self,kind,steps):
+        if not self.song:return
+        if kind=='time':
+            value=self.span or min(300.,self.song['duration'])
+            for _ in range(abs(steps)):
+                step=.5 if value<=10 else 1. if value<=30 else 5.
+                value=self.clamp_span(value+step*(1 if steps>0 else -1))
+            self.setSpan(value)
+        elif kind=='width':self.setPitchWidth(self.high-self.low+steps)
+        elif kind=='center':self.pitchMove(steps)
     @Slot(bool)
     def showBlocks(self,on):self.show_blocks=on;self.changed.emit()
     @Slot(bool)
     def showCurve(self,on):self.show_curve=on;self.changed.emit()
     @Slot(str,bool)
-    def compareModel(self,key,on):self.compare.add(key) if on else self.compare.discard(key);self.changed.emit()
+    def compareModel(self,key,on):
+        if on:self.ensure_series(key)
+        if key in self.series:self.compare.add(key) if on else self.compare.discard(key)
+        self.changed.emit()
     @Slot(float,int)
     def wheel(self,steps,modifiers):
         mods=Qt.KeyboardModifier(modifiers)
@@ -406,11 +508,24 @@ class Controller(QObject):
         if self.audio_song is self.song:
             self.apply_audio();self.changed.emit();return
         self.audio_song=self.song
-        try:self.vocal_boost=vocal_gain(self.song['audio']['original'],self.song['audio']['vocals'])
+        try:self.vocal_boost=float(self.song.get('presentation',{}).get('gain',1.))
         except (OSError,ValueError,RuntimeError):self.vocal_boost=1.
+        if getattr(self,'analysis_swap',False):
+            self.t=self.player.position()/1000
+            self.presentation.reset(self.t,time.monotonic())
+            self.swap_vocal_source(self.song['audio']['vocals'])
+            self.apply_audio();self.changed.emit();return
         self.revision+=1;self.pending=round(self.t*1000);self.buffer_seek=self.pending;self.resume=self.state['playing'];self.changing=True
         self.player.stop();self.vocal_player.stop();self.vocal_pending=True;self.vocal_player.setSource(QUrl.fromLocalFile(self.song['audio']['vocals']));self.player.setSource(QUrl.fromLocalFile(self.song['audio']['original']));self.apply_audio();self.changing=False;self.changed.emit()
         self.media(self.player.mediaStatus())
+        self.vocal_ready(self.vocal_player.mediaStatus())
+    def swap_vocal_source(self,path):
+        # Keep the original player as the uninterrupted transport clock.
+        # Reload only the vocal source; vocal_ready rejoins the live position.
+        self.vocal_pending=True
+        self.vocal_buffer_pending=True
+        self.vocal_player.stop()
+        self.vocal_player.setSource(QUrl.fromLocalFile(path))
         self.vocal_ready(self.vocal_player.mediaStatus())
     def media(self,status):
         if self.changing:return
@@ -485,24 +600,35 @@ class Controller(QObject):
         current=self.song is old
         new=dict(song,song_id=target_id,view=dict(old.get('view',{})),analysis_versions=versions)
         self.data['songs'][index]=new
-        if current:self.song=None;self.selectSong(index)
+        if current:
+            loop_state=(self.loop,self.loop_a,self.loop_b,self.loop_initialized)
+            self.analysis_swap=True
+            try:self.song=None;self.selectSong(index)
+            finally:self.analysis_swap=False
+            self.loop,self.loop_a,self.loop_b,self.loop_initialized=loop_state
         self.save();return True
     @Slot()
     def applySeparation(self):
+        self.apply_song_separation(self.settings['separationModel'])
+    @Slot(bool)
+    def setSongHarmony(self,enabled):
+        self.apply_song_separation('mel_bs' if enabled else 'mel_roformer')
+    def apply_song_separation(self,mode):
         if not self.song:return
-        target=self.song['song_id'];mode=self.settings['separationModel']
+        target=self.song['song_id']
         if mode==self.song.get('algorithm',{}).get('separation','htdemucs'):return
         if any(j.get('target_id')==target and j['state'] in ['running','queued'] for j in self.data['jobs']):
             self.feedback('这首歌已在分析队列中。');return
         cached=self.song.get('analysis_versions',{}).get(mode)
         if cached and all(Path(p).is_file() for p in list(cached['audio'].values())+list(cached['curves'].values())+[cached['main_notes']]):
             self.install_analysis(cached,target);self.feedback('已切换人声分离结果。');return
+        if not self.high_quality_available:self.feedback('人声模型尚未安装。');return
         source=Path(self.song.get('source',''))
         if not source.is_file():source=Path(self.song['audio']['original'])
         if not source.is_file():self.feedback('原音频已不存在，请重新导入。');return
         self.data['jobs'].append(dict(id=uuid.uuid4().hex,source=str(source),target_id=target,
             separation=mode,state='queued',progress=0,message='等待重新分析'))
-        self.save();self.contentChanged.emit();self.start_next()
+        self.save();self.contentChanged.emit();self.start_next();self.changed.emit()
     @Slot(str)
     def cancelQueued(self,key):
         job=next((j for j in self.data['jobs'] if j['id']==key and j['state']=='queued'),None)
@@ -521,16 +647,35 @@ class Controller(QObject):
         job=self.active or self.display_job
         if job:self.removeJob(job['id'])
     def start_next(self):
-        if self.process:return
+        if self.closing or self.active or (self.process and (not self.reusable_worker or self.worker_closing)):return
         job=next((j for j in self.data['jobs'] if j['state']=='queued'),None)
-        if not job:return
+        if not job:
+            if self.process and self.reusable_worker and not self.worker_closing:
+                self.worker_closing=True;self.process.closeWriteChannel()
+            return
         self.active=job;self.display_job=job;job.update(state='running',message='准备分析');self.save();self.buffer=''
         self.result_file=self.folder/(job['id']+'-result.json');self.log_file=self.folder/(job['id']+'.log')
-        p=QProcess(self);self.process=p;env=QProcessEnvironment.systemEnvironment();env.insert('PYTHONIOENCODING','utf-8');env.insert('PYTHONUNBUFFERED','1');p.setProcessEnvironment(env)
-        p.setWorkingDirectory(str(ROOT));p.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels);p.readyReadStandardOutput.connect(self.read_progress)
-        p.finished.connect(self.finished);p.errorOccurred.connect(lambda e:self.finished(-1) if e==QProcess.ProcessError.FailedToStart else None)
-        p.start(worker_python(),['-u',str(self.worker),job['source'],'--standalone','--result-file',str(self.result_file),'--separation',job.get('separation','htdemucs')])
+        if self.process is None:
+            p=QProcess(self);self.process=p;self.worker_closing=False
+            env=QProcessEnvironment.systemEnvironment();env.insert('PYTHONIOENCODING','utf-8');env.insert('PYTHONUNBUFFERED','1');p.setProcessEnvironment(env)
+            p.setWorkingDirectory(str(ROOT));p.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+            p.readyReadStandardOutput.connect(lambda proc=p:self.read_progress() if self.process is proc else None)
+            p.finished.connect(lambda code,*args,proc=p:self.worker_exited(proc,code))
+            p.errorOccurred.connect(lambda e,proc=p:self.worker_exited(proc,-1) if e==QProcess.ProcessError.FailedToStart else None)
+            if self.reusable_worker:p.start(worker_python(),['-u',str(ROOT/'analysis_worker.py')])
+            else:p.start(worker_python(),['-u',str(self.worker),job['source'],'--standalone','--result-file',str(self.result_file),'--separation',job.get('separation','htdemucs')])
+        if self.reusable_worker:
+            request=dict(id=job['id'],source=job['source'],result_file=str(self.result_file),separation=job.get('separation','htdemucs'))
+            self.process.write((json.dumps(request)+'\n').encode('utf-8'))
         self.contentChanged.emit();self.changed.emit()
+
+    def worker_exited(self,process,code):
+        if self.process is not process:return
+        self.read_progress()
+        if self.active:self.finished(code)
+        else:
+            self.process=None;self.worker_closing=False;process.deleteLater();QTimer.singleShot(0,self.start_next)
+
     def read_progress(self):
         if not self.process:return
         text=bytes(self.process.readAllStandardOutput()).decode('utf-8',errors='replace')
@@ -538,12 +683,20 @@ class Controller(QObject):
         self.buffer+=text
         while '\n' in self.buffer:
             line,self.buffer=self.buffer.split('\n',1)
-            if line.startswith('VPL_EVENT '):
+            if line.startswith('VPL_JOB_DONE ') and self.reusable_worker and self.active:
+                try:
+                    done=json.loads(line[13:])
+                    if done.get('id')==self.active['id']:self.finished(int(done['code']),job_done=True)
+                except (ValueError,TypeError,KeyError):pass
+            elif line.startswith('VPL_EVENT ') and self.active:
                 try:self.active.update(json.loads(line[10:]));self.changed.emit()
                 except (ValueError,TypeError):pass
-    def finished(self,code,*args):
-        if not self.process:return
-        self.read_progress();p=self.process;job=self.active;self.process=None;self.active=None
+    def finished(self,code,*args,job_done=False):
+        if not self.process or not self.active:return
+        if not job_done:self.read_progress()
+        if not self.active:return
+        p=self.process;job=self.active;self.active=None
+        if not job_done:self.process=None
         if job['state']=='cancelled':job['message']='已取消，可重试'
         elif code==0 and self.result_file.exists():
             try:
@@ -569,7 +722,13 @@ class Controller(QObject):
         if job.get('remove_after_stop'):
             self.data['jobs']=[j for j in self.data['jobs'] if j is not job]
             if self.display_job is job:self.display_job=None
-        self.save();self.contentChanged.emit();self.changed.emit();p.deleteLater();QTimer.singleShot(0,self.start_next)
+        self.save();self.contentChanged.emit();self.changed.emit()
+        if job_done:
+            if code!=0 or not any(j['state']=='queued' for j in self.data['jobs']):
+                self.worker_closing=True;p.closeWriteChannel()
+        else:
+            self.worker_closing=False;p.deleteLater()
+        QTimer.singleShot(0,self.start_next)
     def stop_worker(self):
         if not self.process:return
         pid=int(self.process.processId())
@@ -593,11 +752,15 @@ class Controller(QObject):
             job['state']='retried';self.data['jobs'].append(replacement);self.save();self.contentChanged.emit();self.start_next()
     @Slot()
     def shutdown(self):
+        self.closing=True;self.presentation_queue.clear()
+        if self.presentation_process:
+            self.presentation_process.blockSignals(True);self.presentation_process.kill();self.presentation_process.waitForFinished(3000);self.presentation_process=None
         self.remember_view();self.memory_timer.stop();self.changing=True;self.player.stop();self.changing=False
         self.vocal_player.stop()
         if self.piano:self.piano.close()
         if self.process:
-            self.active.update(state='interrupted',message='分析已中断，可重试');self.process.blockSignals(True);self.stop_worker();self.process.waitForFinished(3000);self.process=None
+            if self.active:self.active.update(state='interrupted',message='分析已中断，可重试')
+            self.process.blockSignals(True);self.stop_worker();self.process.waitForFinished(3000);self.process=None
         for j in self.data['jobs']:
             if j['state']=='queued':j.update(state='interrupted',message='等待任务已中断，可重试')
         self.save()
@@ -731,17 +894,17 @@ class PitchView(QQuickPaintedItem):
         if b.settings['liveCurve']:
             parts=state['pitch'].split(' ',1);labels.append(('曲线',parts[0],parts[1] if len(parts)>1 else ''))
         if labels:
-            box_w=116*len(labels);box_h=56
-            bx=max(x0+8,min(x(b.t)-box_w-16,x0+w-box_w-8));by=y0+max(14,min(64,h*.12))
+            box_w=116*len(labels);box_h=48
+            bx=max(x0,min(x(b.t)-box_w/2,x0+w-box_w));by=max(2,y0-box_h-8)
             p.setPen(QPen(QColor('#4b5665' if dark else '#d4dee8'),.8));p.setBrush(QColor('#ed29333f' if dark else '#f4f4f8fc'));p.drawRoundedRect(QRectF(bx,by,box_w,box_h),14,14)
             for i,(caption,value,detail) in enumerate(labels):
                 cx=bx+i*116+12
                 font=QFont('Microsoft YaHei');font.setPixelSize(11);p.setFont(font);p.setPen(QColor(muted))
                 p.drawText(QRectF(cx,by+5,94,14),Qt.AlignmentFlag.AlignVCenter,caption)
-                font.setPixelSize(21);font.setBold(True);p.setFont(font);p.setPen(QColor('#b3d7ff' if dark else '#174c82'))
-                p.drawText(QRectF(cx,by+22,52,28),Qt.AlignmentFlag.AlignVCenter,value)
+                font.setPixelSize(18);font.setBold(True);p.setFont(font);p.setPen(QColor('#b3d7ff' if dark else '#174c82'))
+                p.drawText(QRectF(cx,by+20,52,24),Qt.AlignmentFlag.AlignVCenter,value)
                 font.setPixelSize(11);font.setBold(False);p.setFont(font);p.setPen(QColor(muted))
-                p.drawText(QRectF(cx+50,by+24,50,26),Qt.AlignmentFlag.AlignVCenter,detail)
+                p.drawText(QRectF(cx+50,by+20,50,24),Qt.AlignmentFlag.AlignVCenter,detail)
                 if i:
                     p.setPen(QPen(QColor('#46505c' if dark else '#dae2eb'),.7));p.drawLine(QPointF(cx-12,by+10),QPointF(cx-12,by+box_h-10))
     def mousePressEvent(self,event):
