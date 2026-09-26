@@ -17,8 +17,7 @@ def main():
     for name in MODULES:copy(ROOT/(name+'.py'),OUT/(name+'.py'))
     for name in ['assets','qml','installer','resources','note-settings.json','LICENSE',
                  'THIRD_PARTY_NOTICES.md','MODEL_LICENSE_REVIEW.md','INSTALLATION.md',
-                 'CHANGELOG.md','RELEASE_NOTES_1.1.0.md',
-                 'requirements.txt']:
+                 'CHANGELOG.md','RELEASE_NOTES_1.1.0.md','requirements.txt']:
         copy(ROOT/name,OUT/name)
     for name in VENDOR:copy(ROOT/'vendor'/name,OUT/'vendor'/name)
     (OUT/'.gitignore').write_text('work/\nbuild/\ndist/\ninput/\noutputs/\nresults/\nmodels/\nlibrary/\ndatasets/\n.venv/\nbin/\n__pycache__/\n*.pyc\n.env\n',encoding='utf-8')
