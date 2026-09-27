@@ -5,6 +5,7 @@
 - `resources/reproducible/` 保存依赖清单、下载地址、校验值与补丁。
 - `rebuild_environment.py` 从准备好的依赖文件建立独立运行环境。
 - `prepare_delivery.py` 汇集应用代码、运行库、模型及许可证文件。
+- `privacy_check.py` 检查内部文档、编译缓存和本机路径；额外检查名单由本地 JSON 文件传入，不纳入仓库。
 - `VocalPitchLab.iss` 生成安装程序，支持首次安装和覆盖更新。
 - `prepare_github_assets.py` 生成分卷校验文件与安装说明。
 - `prepare_source_bundle.py` 导出源码包，不包含歌曲、模型权重、用户数据和本机测试记录。
@@ -18,3 +19,5 @@ ISCC /DStageDir=<应用目录的绝对路径> /DGithubAssets installer/VocalPitc
 ```
 
 `build_preview.py` 和沙盒脚本用于本地验证。安装包未进行代码签名。
+
+安装器支持 `/PACKAGEVALIDATION=1` 验证模式，配合 `/DIR=<临时目录>` 使用；不创建快捷方式、卸载记录或修改正式安装的注册信息。此模式仍会检查必要的微软运行组件。正式安装不传此参数。

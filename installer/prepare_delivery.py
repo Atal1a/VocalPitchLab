@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from application_files import SOURCE_FILES, RESOURCES, VENDOR
 from trim_runtime import trim
+from privacy_check import ignore_private_files, inspect
 
 ROOT = Path(__file__).resolve().parents[1]
 STAGE = ROOT / 'build/delivery-1.1.0'
@@ -15,7 +16,7 @@ BASE = ROOT / 'build/slim-preview/runtime'
 def copy(src, dst):
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
-        shutil.copytree(src, dst, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        shutil.copytree(src, dst, ignore=ignore_private_files)
     else:
         shutil.copy2(src, dst)
 
@@ -42,6 +43,8 @@ def main():
     subprocess.run([str(csc), '/nologo', '/target:winexe', '/platform:x64', '/optimize+',
                     '/reference:System.Windows.Forms.dll', '/win32icon:'+str(ROOT/'assets/vocalpitch.ico'),
                     '/out:'+str(STAGE/'VocalPitchLab.exe'), str(ROOT/'installer/Launcher.cs')], check=True)
+    audit = inspect(STAGE, [str(ROOT), str(Path.home())])
+    if not audit['passed']: raise RuntimeError('Private build content: '+str(audit['findings']))
     files=[]
     for p in sorted(STAGE.rglob('*')):
         if p.is_file():
