@@ -3,7 +3,7 @@ import csv, json, hashlib
 from pathlib import Path
 import numpy as np
 from scipy.ndimage import median_filter
-from lab import ROOT
+from vocalpitchlab.audio.audio_io import ROOT
 
 DATA=ROOT/'datasets/vocadito'
 OUT=ROOT/'results/vocadito-v1'
@@ -76,8 +76,8 @@ def score(rows,config):
 
 def main():
     import librosa,soundfile as sf,torch
-    from lab import track
-    from rmvpe_adapter import PitchEstimator
+    from vocalpitchlab.audio.audio_io import track
+    from vocalpitchlab.audio.rmvpe_adapter import PitchEstimator
     OUT.mkdir(parents=True,exist_ok=True);(OUT/'cache').mkdir(exist_ok=True)
     rows=list(csv.DictReader((DATA/'vocadito_metadata.csv').open()))
     singers=sorted({r['singer_id'] for r in rows},key=lambda s:hashlib.sha256(('vocalpitch-v1:'+s).encode()).hexdigest())

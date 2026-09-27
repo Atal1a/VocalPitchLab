@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from application_files import MODULES, RESOURCES, VENDOR
+from application_files import SOURCE_FILES, RESOURCES, VENDOR
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -61,7 +61,7 @@ def main():
         dst.parent.mkdir(parents=True,exist_ok=True)
         if src.is_dir():shutil.copytree(src,dst,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
         else:shutil.copy2(src,dst)
-    for name in MODULES:copy(ROOT/(name+'.py'),stage/(name+'.py'))
+    for name in SOURCE_FILES:copy(ROOT/name,stage/name)
     for name in RESOURCES:copy(ROOT/name,stage/name)
     for name in VENDOR:copy(ROOT/'vendor'/name,stage/'vendor'/name)
     for r in binaries:copy(ROOT/r['path'],stage/r['path'])

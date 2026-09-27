@@ -10,7 +10,7 @@ def cpu_fallback():
 def hardware(replay=False):
     global _hardware
     if _hardware is None:
-        from hardware_check import probe
+        from vocalpitchlab.runtime.hardware_check import probe
         _hardware=probe()
         replay=True
     if replay:

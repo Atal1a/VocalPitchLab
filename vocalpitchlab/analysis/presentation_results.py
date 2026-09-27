@@ -3,7 +3,7 @@ import csv
 import json
 from pathlib import Path
 import numpy as np
-from analysis_cache import stage, digest_file, atomic_json
+from vocalpitchlab.analysis.analysis_cache import stage, digest_file, atomic_json
 
 PRESENTATION_VERSION = 'presentation-v1'
 
@@ -20,9 +20,9 @@ def read_curve(path):
 
 
 def prepare(song):
-    from game_notes import display_cache_path, reconcile_notes, REFINEMENT_VERSION, RECONCILE_SETTINGS
-    from curve_reliability import display_weight, note_evidence, NOTE_EVIDENCE_VERSION as evidence_version, VERSION as display_version
-    from main_notes import extract, current_settings
+    from vocalpitchlab.analysis.game_notes import display_cache_path, reconcile_notes, REFINEMENT_VERSION, RECONCILE_SETTINGS
+    from vocalpitchlab.analysis.curve_reliability import display_weight, note_evidence, NOTE_EVIDENCE_VERSION as evidence_version, VERSION as display_version
+    from vocalpitchlab.analysis.main_notes import extract, current_settings
     curves = song['curves']
     key = next(k for k in ['rmvpe_tracked', 'rmvpe_vocals', 'tuned_vocals', 'crepe_full'] if k in curves)
     raw = display_cache_path(song)
@@ -65,7 +65,7 @@ def prepare(song):
     # Loudness depends on audio, not note rules, and can be reused independently.
     audio = Path(song['audio']['vocals'])
     def loudness(folder):
-        from plot_support import vocal_loudness, vocal_gain
+        from vocalpitchlab.ui.plot_support import vocal_loudness, vocal_gain
         t, v = vocal_loudness(audio, folder)
         np.savez_compressed(folder/'loudness.npz', time=t, level=v)
         atomic_json(folder/'gain.json', dict(gain=vocal_gain(song['audio']['original'], audio)))
@@ -80,9 +80,9 @@ def prepare(song):
 
 
 def load(value):
-    from game_notes import REFINEMENT_VERSION, RECONCILE_SETTINGS
-    from main_notes import current_settings
-    from curve_reliability import NOTE_EVIDENCE_VERSION as VERSION, VERSION as display_version
+    from vocalpitchlab.analysis.game_notes import REFINEMENT_VERSION, RECONCILE_SETTINGS
+    from vocalpitchlab.analysis.main_notes import current_settings
+    from vocalpitchlab.analysis.curve_reliability import NOTE_EVIDENCE_VERSION as VERSION, VERSION as display_version
     if value.get('version') != PRESENTATION_VERSION or value.get('refinement') != REFINEMENT_VERSION or value.get('evidence_version') != VERSION or value.get('display_version') != display_version:
         raise ValueError('Presentation needs refresh')
     if value.get('settings')!=RECONCILE_SETTINGS or (not value.get('game_available') and value.get('fallback_settings')!=current_settings()):

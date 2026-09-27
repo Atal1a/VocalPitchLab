@@ -6,7 +6,8 @@ from scipy.ndimage import median_filter
 
 SETTINGS=dict(version=1,median_frames=5,change_hold_seconds=.08,min_note_seconds=.10,
               same_note_gap_seconds=.03,hysteresis_semitones=.65)
-CONFIG_PATH=Path(__file__).resolve().parent/'note-settings.json'
+from vocalpitchlab.runtime.paths import APP_ROOT
+CONFIG_PATH=APP_ROOT/'note-settings.json'
 
 def current_settings():
     return json.loads(CONFIG_PATH.read_text(encoding='utf-8')) if CONFIG_PATH.exists() else SETTINGS.copy()
@@ -117,7 +118,7 @@ def export_notes(path,notes):
         writer=csv.DictWriter(f,fieldnames=fields);writer.writeheader();writer.writerows(notes)
 
 def main():
-    from lab import ROOT
+    from vocalpitchlab.audio.audio_io import ROOT
     from rmvpe_batch import read_pitch
     index_path=sorted((ROOT/'results').glob('rmvpe-*/index.json'))[-1]
     index=json.loads(index_path.read_text(encoding='utf-8'))

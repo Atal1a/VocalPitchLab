@@ -9,9 +9,8 @@ def copy(src,dst):
     dst.parent.mkdir(parents=True,exist_ok=True)
     if src.is_dir():shutil.copytree(src,dst,dirs_exist_ok=True,ignore=shutil.ignore_patterns('__pycache__','*.pyc','.git'))
     else:shutil.copy2(src,dst)
-from application_files import MODULES
-modules=MODULES
-for name in modules:copy(ROOT/(name+'.py'),stage/(name+'.py'))
+from application_files import SOURCE_FILES
+for name in SOURCE_FILES:copy(ROOT/name,stage/name)
 for name in ['qml','assets','resources','note-settings.json','LICENSE','THIRD_PARTY_NOTICES.md','INSTALLATION.md']:copy(ROOT/name,stage/name)
 copy(ROOT/'installer/launch.py',stage/'launch.py')
 for name in ['__init__.py','rmvpe_rvc.py','LICENSE-RVC','MODEL-CARD-RVC.md','provenance.json','separation-runtime']:

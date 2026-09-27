@@ -1,7 +1,7 @@
 """Prepare a small source repository without songs, model weights or local environments."""
 from pathlib import Path
 import shutil
-from application_files import MODULES, VENDOR
+from application_files import SOURCE_FILES, VENDOR
 
 ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'work/github-source-1.1.0'
@@ -14,10 +14,10 @@ def copy(src,dst):
 def main():
     if OUT.exists():raise SystemExit('Source export already exists; preserve existing work')
     OUT.mkdir(parents=True)
-    for name in MODULES:copy(ROOT/(name+'.py'),OUT/(name+'.py'))
-    for name in ['assets','qml','installer','resources','note-settings.json','LICENSE',
+    for name in SOURCE_FILES:copy(ROOT/name,OUT/name)
+    for name in ['assets','qml','installer','resources','docs','tests','note-settings.json','LICENSE',
                  'THIRD_PARTY_NOTICES.md','MODEL_LICENSE_REVIEW.md','INSTALLATION.md',
-                 'CHANGELOG.md','RELEASE_NOTES_1.1.0.md','requirements.txt']:
+                 'CHANGELOG.md','RELEASE_NOTES_1.1.0.md','requirements.txt','.gitattributes']:
         copy(ROOT/name,OUT/name)
     for name in VENDOR:copy(ROOT/'vendor'/name,OUT/'vendor'/name)
     (OUT/'.gitignore').write_text('work/\nbuild/\ndist/\ninput/\noutputs/\nresults/\nmodels/\nlibrary/\ndatasets/\n.venv/\nbin/\n__pycache__/\n*.pyc\n.env\n',encoding='utf-8')

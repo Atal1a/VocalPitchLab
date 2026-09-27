@@ -4,7 +4,7 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
-from application_files import MODULES, RESOURCES, VENDOR
+from application_files import SOURCE_FILES, RESOURCES, VENDOR
 from trim_runtime import trim
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +23,7 @@ def main():
     if STAGE.exists():
         raise SystemExit('Delivery stage already exists; preserve it and choose a fresh version')
     STAGE.mkdir(parents=True)
-    for name in MODULES: copy(ROOT / (name+'.py'), STAGE / (name+'.py'))
+    for name in SOURCE_FILES: copy(ROOT/name, STAGE/name)
     for name in [*RESOURCES, 'INSTALLATION.md', 'CHANGELOG.md']: copy(ROOT/name, STAGE/name)
     copy(ROOT/'installer/launch.py', STAGE/'launch.py')
     for name in [*VENDOR, 'separation-runtime']: copy(CLEAN/'vendor'/name, STAGE/'vendor'/name)

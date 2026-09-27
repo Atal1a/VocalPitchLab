@@ -1,7 +1,7 @@
 """Read-only application files and separately writable user data."""
 import os,sys
 from pathlib import Path
-APP_ROOT=Path(__file__).resolve().parent
+APP_ROOT=Path(__file__).resolve().parents[2]
 DATA_ROOT=Path(os.environ.get('VPL_DATA_DIR',str(APP_ROOT))).expanduser().resolve()
 MODEL_ROOT=Path(os.environ.get('VPL_MODEL_DIR',str(DATA_ROOT/'models'))).resolve()
 def prepare():

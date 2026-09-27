@@ -2,7 +2,7 @@
 import argparse,hashlib,json,shutil,zipfile,time
 from pathlib import Path
 import requests
-from app_paths import APP_ROOT,MODEL_ROOT
+from vocalpitchlab.runtime.paths import APP_ROOT, MODEL_ROOT
 def digest(path):
     h=hashlib.sha256()
     with path.open('rb') as f:

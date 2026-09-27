@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 import uuid
 
-from app_paths import DATA_ROOT
+from vocalpitchlab.runtime.paths import DATA_ROOT
 
 
 def digest_file(path):

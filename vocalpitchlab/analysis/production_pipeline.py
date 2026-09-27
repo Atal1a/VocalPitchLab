@@ -4,15 +4,15 @@ from pathlib import Path
 import time
 import numpy as np
 import soundfile as sf
-from analysis_cache import stage, digest_file, atomic_json
+from vocalpitchlab.analysis.analysis_cache import stage, digest_file, atomic_json
 
 
 def analyze(source, separation='mel_bs', progress=None):
-    from pipeline_timing import Timeline
+    from vocalpitchlab.analysis.pipeline_timing import Timeline
     timeline=Timeline()
-    from lab import decode, track, write_track, separate as demucs
-    from vocal_separator import separate, VERSION as separation_version
-    from resource_policy import device as select_device, clear, overlap_game, hardware
+    from vocalpitchlab.audio.audio_io import decode, track, write_track, separate as demucs
+    from vocalpitchlab.audio.vocal_separator import separate, VERSION as separation_version
+    from vocalpitchlab.runtime.resource_policy import device as select_device, clear, overlap_game, hardware
     import torch
     progress = progress or (lambda value, message: None)
     source = Path(source).resolve()
@@ -20,7 +20,7 @@ def analyze(source, separation='mel_bs', progress=None):
     device = select_device()
     if device=='cuda':torch.cuda.reset_peak_memory_stats()
     resource = dict(device=device, torch=torch.__version__, memory_limit=os.environ.get('VPL_CUDA_MEMORY_GIB', '0'))
-    from separation_execution import select as separation_policy
+    from vocalpitchlab.audio.separation_execution import select as separation_policy
     resource['separation_execution']=separation_policy(device)
     metrics = {}
 
@@ -69,7 +69,7 @@ def analyze(source, separation='mel_bs', progress=None):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
     cancel_game=Event()
-    from game_notes import GameNotes, VERSION, REFINEMENT_VERSION
+    from vocalpitchlab.analysis.game_notes import GameNotes, VERSION, REFINEMENT_VERSION
     def game(folder):
         audio, sr = sf.read(vocals, dtype='float32', always_2d=True)
         notes = GameNotes().transcribe(audio, sr, cancel_event=cancel_game)
@@ -93,8 +93,8 @@ def analyze(source, separation='mel_bs', progress=None):
         clear()
         progress(78, '整理连续音高')
         def rmvpe(folder):
-            from rmvpe_adapter import PitchEstimator
-            from pitch_experiments import continuous_pitch
+            from vocalpitchlab.audio.rmvpe_adapter import PitchEstimator
+            from vocalpitchlab.analysis.pitch_models import continuous_pitch
             audio, sr = sf.read(vocals, dtype='float32', always_2d=True)
             raw, salience, rms = PitchEstimator(device).track(audio, sr, return_salience=True)
             pitch, score = continuous_pitch(salience, rms, raw[4])
@@ -124,7 +124,7 @@ def analyze(source, separation='mel_bs', progress=None):
         progress(93, '音符模型暂不可用，使用连续曲线整理音符')
     clear()
     progress(96, '整理主要音符')
-    from presentation_results import prepare
+    from vocalpitchlab.analysis.presentation_results import prepare
     with timeline.span('presentation'):song['presentation'] = prepare(song)
     song['main_notes'] = song['presentation']['notes']
     song['algorithm']['note_events'] = (VERSION if song.get('game_notes') else 'curve-fallback')+'+'+REFINEMENT_VERSION

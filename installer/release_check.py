@@ -34,15 +34,15 @@ def check(stage=None):
     add('clean-environment-build',clean,'Fixed-pipeline Python environment rebuilt from hash-locked wheels and tested; see outputs/clean-environment-offline. Not a clean Windows certification.')
     for name, detail in {
         'third-party-distribution': 'Qt/FFmpeg and transitive runtime license/source obligations remain under review',
-        'clean-windows': 'Offline VC++ prerequisite integration added after Sandbox diagnosed the old preview. User requested no further tests; new integration is not compiled or validated. See WINDOWS_SANDBOX_QA.md',
+        'clean-windows': 'Offline VC++ prerequisite integration added after Sandbox diagnosed the old preview. Independent validation of the current installer is not recorded here.',
         'hardware-matrix': 'RTX 4080 tested; physical low-VRAM/low-RAM and other GPU generations not verified',
         'upgrade-migration': 'Existing user library/settings upgrade and rollback not yet verified',
     }.items():
         add(name, False, detail)
     if stage:
         stage = Path(stage)
-        for name in ['quick_app.py', 'hardware_check.py', 'resource_policy.py', 'lab.py',
-                     'vocal_separator.py', 'rmvpe_adapter.py']:
+        from application_files import SOURCE_FILES
+        for name in SOURCE_FILES:
             packaged = stage / name
             add('stage-current:' + name, packaged.is_file() and packaged.read_bytes() == (ROOT/name).read_bytes(),
                 'Compiled previews must be rebuilt only after release preparation is complete')

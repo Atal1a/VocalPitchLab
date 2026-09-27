@@ -3,9 +3,9 @@ import csv
 import json
 from pathlib import Path
 import numpy as np
-from benchmark_vocadito import OUT, DATA, predict, single, metrics, save
-from lab import ROOT, write_track
-from main_notes import extract, audio_onsets, current_settings
+from vocalpitchlab.analysis.pitch_metrics import OUT, DATA, predict, single, metrics, save
+from vocalpitchlab.audio.audio_io import ROOT, write_track
+from vocalpitchlab.analysis.main_notes import extract, audio_onsets, current_settings
 
 DEST = ROOT/'results/hysteresis-v1'
 

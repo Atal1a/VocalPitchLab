@@ -9,7 +9,7 @@ os.environ.setdefault('PYTHONIOENCODING','utf-8')
 os.chdir(APP)
 sys.path.insert(0,str(APP))
 try:
-    from quick_app import main
+    from vocalpitchlab.ui.app import main
     sys.exit(main())
 except Exception:
     import traceback,ctypes

@@ -5,14 +5,14 @@ import traceback
 
 
 def main():
-    import separation_pool
+    import vocalpitchlab.audio.separation_pool as separation_pool
     separation_pool.enable()
     try:return run_jobs()
     finally:separation_pool.enable(False)
 
 
 def run_jobs():
-    from analyze_song import execute
+    from vocalpitchlab.analysis.analyze_song import execute
     for line in sys.stdin:
         job_id=None
         try:

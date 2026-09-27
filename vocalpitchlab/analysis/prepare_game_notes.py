@@ -1,7 +1,7 @@
 """Prepare versioned GAME caches without changing the live library index."""
 import json,time
 import soundfile as sf
-from game_notes import GameNotes,cache_path,ROOT,VERSION,gate_silent_notes
+from vocalpitchlab.analysis.game_notes import GameNotes, cache_path, ROOT, VERSION, gate_silent_notes
 
 def prepare(song,model=None):
     path=cache_path(song)

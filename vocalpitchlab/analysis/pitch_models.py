@@ -1,3 +1,4 @@
+from vocalpitchlab.runtime.paths import APP_ROOT, MODEL_ROOT
 """Frozen experimental decoders; no changes to production defaults."""
 import hashlib
 from pathlib import Path
@@ -7,7 +8,7 @@ VERSION='tracking-v2-matched-voicing-fcpe-ddsp200k'
 def result_folder(song):
     p=Path(song['audio']['vocals']);s=p.stat()
     key=hashlib.sha256(f'{p.resolve()}|{s.st_size}|{s.st_mtime_ns}|{VERSION}'.encode()).hexdigest()[:20]
-    from app_paths import DATA_ROOT
+    from vocalpitchlab.runtime.paths import DATA_ROOT
     return DATA_ROOT/'results'/'pitch-experiments'/key
 
 def continuous_pitch(salience,rms,voiced_mask=None):
@@ -53,10 +54,10 @@ class FCPE:
     def __init__(self,device='cuda'):
         import torch,sys
         # Upstream wheel omits f02midi; use the pinned complete source checkout.
-        sys.path.insert(0,str(Path(__file__).resolve().parent/'vendor/fcpe-source'))
+        sys.path.insert(0,str(APP_ROOT/'vendor/fcpe-source'))
         from torchfcpe.models_infer import InferCFNaiveMelPE
         from torchfcpe.tools import DotDict
-        path=Path(__file__).resolve().parent/'models/fcpe-ddsp-200k.pt'
+        path=MODEL_ROOT/'fcpe-ddsp-200k.pt'
         checkpoint=torch.load(path,map_location='cpu',weights_only=True)
         self.model=InferCFNaiveMelPE(DotDict(checkpoint['config_dict']),checkpoint['model']).to(device).eval()
         self.device=device

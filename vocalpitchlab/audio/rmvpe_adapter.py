@@ -2,28 +2,28 @@
 import numpy as np
 import librosa
 import torch
-from app_paths import MODEL_ROOT
+from vocalpitchlab.runtime.paths import MODEL_ROOT
 from vendor.rmvpe_rvc import RMVPE
 
 class PitchEstimator:
     def __init__(self, device='cuda'):
         self.device = device
-        from resource_policy import is_oom,clear
+        from vocalpitchlab.runtime.resource_policy import is_oom, clear
         try:self.engine = RMVPE(str(MODEL_ROOT/'rmvpe.pt'),is_half=False,device=device,use_jit=False)
         except RuntimeError as error:
             if not is_oom(error):raise
-            from resource_policy import cpu_fallback
+            from vocalpitchlab.runtime.resource_policy import cpu_fallback
             cpu_fallback()
             clear();self.device='cpu';self.engine=RMVPE(str(MODEL_ROOT/'rmvpe.pt'),is_half=False,device='cpu',use_jit=False)
 
     def track(self, audio, sr, threshold=.03, chunk_seconds=20, return_salience=False):
-        from resource_policy import is_oom,clear
+        from vocalpitchlab.runtime.resource_policy import is_oom, clear
         for size in [chunk_seconds,5]:
             try:return self._track(audio,sr,threshold,size,return_salience)
             except RuntimeError as error:
                 if not is_oom(error):raise
                 clear();print('VPL_RESOURCE: reducing RMVPE window',flush=True)
-        from resource_policy import cpu_fallback
+        from vocalpitchlab.runtime.resource_policy import cpu_fallback
         cpu_fallback()
         self.engine.model.cpu();del self.engine;clear();self.__init__('cpu')
         return self._track(audio,sr,threshold,5,return_salience)

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import time
 
-from app_paths import APP_ROOT,DATA_ROOT,MODEL_ROOT,prepare
+from vocalpitchlab.runtime.paths import APP_ROOT, DATA_ROOT, MODEL_ROOT, prepare
 ROOT = DATA_ROOT
 prepare()
 os.environ.setdefault('TORCH_HOME', str(MODEL_ROOT))
@@ -64,10 +64,10 @@ def track(audio, sr, method, device, threshold=0.21):
                                             frame_length=1024, hop_length=160)
         raw = f0.copy()
     else:
-        from resource_policy import batches,is_oom,clear
+        from vocalpitchlab.runtime.resource_policy import batches, is_oom, clear
         for attempt_device,batch in [(device,b) for b in batches(device)]+([('cpu',32)] if device=='cuda' else []):
             if attempt_device=='cpu' and device=='cuda':
-                from resource_policy import cpu_fallback
+                from vocalpitchlab.runtime.resource_policy import cpu_fallback
                 cpu_fallback()
             try:
                 pitch,periodicity=torchcrepe.predict(torch.from_numpy(y)[None],16000,hop_length=160,
@@ -114,12 +114,12 @@ def run(args, progress=None):
     source = Path(args.file).resolve()
     if not source.is_file():
         raise FileNotFoundError(source)
-    from resource_policy import device as select_device
+    from vocalpitchlab.runtime.resource_policy import device as select_device
     device = select_device()
     stamp = time.strftime('%Y%m%d-%H%M%S') + '-' + str(time.time_ns())[-6:]
     folder = ROOT / 'results' / (source.stem + '-' + stamp)
     folder.mkdir(parents=True)
-    from resource_policy import hardware
+    from vocalpitchlab.runtime.resource_policy import hardware
     (folder/'hardware.json').write_text(json.dumps(hardware(),ensure_ascii=False,indent=2),encoding='utf-8')
     progress(5,'读取音频')
     decode(source, folder / 'original.wav', args.start, args.seconds)
@@ -135,7 +135,7 @@ def run(args, progress=None):
     progress(15,'提取人声')
     if args.no_separate:vocals=audio
     elif getattr(args,'separation','htdemucs') in ['mel_roformer','mel_bs']:
-        from vocal_separator import separate as high_quality,VERSION
+        from vocalpitchlab.audio.vocal_separator import separate as high_quality, VERSION
         progress(15,'提取高质量人声');vocals=high_quality(audio,sr,device,folder);info['separation_version']=VERSION
     else:vocals=separate(audio,sr,device)
     if not args.no_separate and getattr(args,'separation','')=='mel_bs':

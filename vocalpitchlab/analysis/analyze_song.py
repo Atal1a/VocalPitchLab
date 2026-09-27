@@ -3,15 +3,15 @@ import argparse
 import json
 import time
 from pathlib import Path
-from app_paths import DATA_ROOT, prepare
-from analysis_cache import atomic_json
+from vocalpitchlab.runtime.paths import DATA_ROOT, prepare
+from vocalpitchlab.analysis.analysis_cache import atomic_json
 
 
 def execute(file,result_file=None,standalone=True,separation='mel_bs'):
     prepare()
     def progress(value, message):
         print('VPL_EVENT '+json.dumps(dict(progress=value, message=message), ensure_ascii=False), flush=True)
-    from production_pipeline import analyze
+    from vocalpitchlab.analysis.production_pipeline import analyze
     song = analyze(Path(file), separation, progress)
     previous = sorted((DATA_ROOT/'results').glob('rmvpe-*/index.json'))
     old = json.loads(previous[-1].read_text(encoding='utf-8')) if previous and not standalone else dict(songs=[])

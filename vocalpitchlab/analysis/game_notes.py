@@ -3,7 +3,7 @@ import json,hashlib
 from pathlib import Path
 import numpy as np
 
-from app_paths import DATA_ROOT,MODEL_ROOT
+from vocalpitchlab.runtime.paths import DATA_ROOT, MODEL_ROOT
 ROOT=DATA_ROOT
 GAME_SEED=7301
 VERSION='game-small-1.0.3-8steps-universal-v3-seed7301'
@@ -250,7 +250,7 @@ def reconcile_notes(notes,times,midi,reliability=None):
     Raw notes and the pitch curve remain immutable. Large/octave disagreements
     retain the former policy; protected model shorts take priority over fills.
     """
-    from main_notes import extract
+    from vocalpitchlab.analysis.main_notes import extract
     result=refine_event_notes(notes,times,midi)
     if len(times)<2:return result
     times=np.asarray(times);midi=np.asarray(midi);cfg=RECONCILE_SETTINGS

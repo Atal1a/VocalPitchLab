@@ -9,7 +9,7 @@ os.environ['VPL_DEVICE']=os.environ.get('VPL_QA_DEVICE','cpu');os.environ['QT_QP
 os.environ['PATH']=str(appdir/'bin')+os.pathsep+os.environ.get('PATH','')
 out=Path(sys.argv[1]);out.mkdir(exist_ok=True)
 try:
-    from quick_app import Controller,create_engine,QGuiApplication
+    from vocalpitchlab.ui.app import Controller, create_engine, QGuiApplication
     from PySide6.QtTest import QTest
     app=QGuiApplication([]);controller=Controller(bootstrap=False);engine=create_engine(controller)
     assert engine.rootObjects()

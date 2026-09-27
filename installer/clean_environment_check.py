@@ -22,13 +22,13 @@ offline_worker.write_text(
     'def deny(*args,**kwargs): raise OSError("QA: outbound Python network is disabled")\n'
     'socket.socket.connect=deny\nsocket.socket.connect_ex=deny\nsocket.create_connection=deny\n'
     f'sys.path.insert(0,{str(args.app)!r})\n'
-    f'runpy.run_path({str(args.app/"analyze_song.py")!r},run_name="__main__")\n',encoding='utf-8')
+    'runpy.run_module("vocalpitchlab.analysis.analyze_song",run_name="__main__")\n',encoding='utf-8')
 os.environ.update(VPL_DATA_DIR=str(args.data),VPL_MODEL_DIR=str(args.app/'models'),
                   QT_QPA_PLATFORM='offscreen',QSG_RHI_BACKEND='software',PYTHONNOUSERSITE='1')
 os.environ['PATH']=str(args.app/'bin')+os.pathsep+os.environ.get('PATH','')
 sys.path.insert(0,str(args.app))
 import numpy,torch,PySide6
-from quick_app import Controller,create_engine,QGuiApplication
+from vocalpitchlab.ui.app import Controller, create_engine, QGuiApplication
 from PySide6.QtTest import QTest
 from PySide6.QtCore import qInstallMessageHandler
 
@@ -81,7 +81,7 @@ try:
                 vocal_playback=True,piano_midi=True,piano_audible_test=False,
                 cancellation=True,delete_job=True,settings_persistence=True,library_persistence=True,
                 python=sys.version,runtime=sys.executable,app=str(args.app),data=str(args.data))
-    source_files=list(args.app.glob('*.py'))+list((args.app/'qml').rglob('*.qml'))
+    source_files=list((args.app/'vocalpitchlab').rglob('*.py'))+list(args.app.glob('*.py'))+list((args.app/'qml').rglob('*.qml'))
     result['application_hashes']={f.relative_to(args.app).as_posix():hashlib.sha256(f.read_bytes()).hexdigest()
                                   for f in source_files if f.name!='launch.py'}
     (args.output/'checks.json').write_text(json.dumps(result,indent=2),encoding='utf-8')

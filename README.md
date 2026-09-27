@@ -11,3 +11,5 @@
 安装方式见 [安装说明](INSTALLATION.md)。
 
 项目自有代码采用 [GPL-3.0-only](LICENSE)，第三方组件适用各自许可，见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+
+源码目录与启动方式见 [开发说明](docs/DEVELOPMENT.md)。

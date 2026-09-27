@@ -3,7 +3,7 @@ import sys,os,logging,gc,time
 from pathlib import Path
 import numpy as np,soundfile as sf
 
-from app_paths import APP_ROOT,MODEL_ROOT
+from vocalpitchlab.runtime.paths import APP_ROOT, MODEL_ROOT
 ROOT=APP_ROOT
 VERSION='mel-kim-87201f4d-adaptive-overlap4-v2'
 
@@ -21,7 +21,7 @@ def separate(audio,sr,device,folder,lead=False):
     if not available():raise FileNotFoundError('High quality vocal separation model/runtime missing')
     if sr!=44100:raise ValueError('RoFormer expects 44100 Hz decoded audio')
     import torch
-    from lab import ffmpeg_path
+    from vocalpitchlab.audio.audio_io import ffmpeg_path
     sys.path.insert(0,str(ROOT/'vendor/separation-runtime'))
     os.environ['PATH']=str(Path(ffmpeg_path()).parent)+os.pathsep+os.environ['PATH']
     from audio_separator.separator import Separator
@@ -31,9 +31,9 @@ def separate(audio,sr,device,folder,lead=False):
     # Logical filename is used only to name output stems by the pinned runtime.
     # Keep FLOAT-WAV-equivalent rounding, without writing then rereading input.
     source=work/'input.wav';scaled_audio=np.asarray(audio*gain,dtype=np.float32)
-    from resource_policy import separation_segments,is_oom,clear
-    from separation_execution import select,configure_attention,precision_failure
-    import separation_pool
+    from vocalpitchlab.runtime.resource_policy import separation_segments, is_oom, clear
+    from vocalpitchlab.audio.separation_execution import select, configure_attention, precision_failure
+    import vocalpitchlab.audio.separation_pool as separation_pool
     policy=select(device);mode=policy['mode']
     attempts=[(device,segment,mode) for segment in separation_segments(device)]
     if device=='cuda':
@@ -43,7 +43,7 @@ def separate(audio,sr,device,folder,lead=False):
     for attempt,(target,segment,precision) in enumerate(attempts):
         if rejected_amp and precision=='amp':precision='fp32'
         if target=='cpu' and device=='cuda':
-            from resource_policy import cpu_fallback
+            from vocalpitchlab.runtime.resource_policy import cpu_fallback
             cpu_fallback()
         model=None
         try:
