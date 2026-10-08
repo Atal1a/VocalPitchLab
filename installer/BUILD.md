@@ -12,6 +12,8 @@
 
 构建脚本使用项目下的 `work/`、`build/` 和 `dist/` 目录。依赖缓存、模型及构建工具需另行准备；源码仓库不包含这些大型文件。模型来源与使用条件见 `../THIRD_PARTY_NOTICES.md` 和 `../MODEL_LICENSE_REVIEW.md`。
 
+GitHub 发布附件包括安装程序、分卷、更新包、源码包和安装说明。`SHA256SUMS.txt` 用于本地校验，不作为下载附件上传。
+
 常规安装包构建使用 Ultra64 分组固实压缩：
 
 ```powershell
