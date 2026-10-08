@@ -8,7 +8,7 @@
 
 [Files]
 ; Extracted on demand before application installation; never remove shared runtimes on uninstall.
-Source: "{#VCRedistPath}"; DestName: "vpl-vc-redist.x64.exe"; Flags: dontcopy noencryption
+Source: "{#VCRedistPath}"; DestName: "vpl-vc-redist.x64.exe"; Flags: dontcopy noencryption solidbreak
 
 [Code]
 var

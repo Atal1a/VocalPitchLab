@@ -3,9 +3,10 @@ from pathlib import Path
 import hashlib
 import json
 import argparse
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / 'dist/VocalPitchLab-1.1.0-windows-x64'
+OUT = ROOT / 'dist/VocalPitchLab-1.1.1-windows-x64'
 
 
 def main():
@@ -17,11 +18,15 @@ def main():
     if len(setups) != 1:
         raise SystemExit('Expected one compiled installer in the release directory')
     setup = setups[0]
+    match = re.fullmatch(r'VocalPitchLab-(\d+\.\d+\.\d+)-windows-x64-setup.exe', setup.name)
+    if not match: raise SystemExit('Unexpected installer filename')
+    version = match[1]
     volumes = sorted(OUT.glob(setup.stem + '-*.bin'))
     if not volumes:
         raise SystemExit('No installer volumes found')
     rows = []
-    for path in [setup, *volumes]:
+    updates = sorted(OUT.glob('*-update-from-*.exe'))
+    for path in [setup, *volumes, *updates, *OUT.glob('*-source.zip')]:
         size = path.stat().st_size
         if not 0 < size < 2 * 1024**3:
             raise SystemExit(f'Invalid GitHub asset size: {path.name}: {size}')
@@ -30,10 +35,13 @@ def main():
         rows.append(dict(name=path.name, bytes=size, sha256=digest))
     (OUT / 'SHA256SUMS.txt').write_text(
         ''.join(f"{r['sha256']}  {r['name']}\n" for r in rows), encoding='ascii')
-    names = '\n'.join(f"- {r['name']}" for r in rows)
+    names = '\n'.join(f"- {path.name}" for path in [setup, *volumes])
     (OUT / '安装说明.txt').write_text(
-        'VocalPitchLab 1.1.0 · Windows x64 离线安装包\n\n'
-        '1. 下载下列全部文件，放在同一文件夹；不要改名。\n'
+        f'VocalPitchLab {version} · Windows x64 离线安装包\n\n' +
+        ('从 1.1.0 更新：只需下载 update-from-1.1.0.exe，关闭软件后运行。\n'
+         '文件缺失或版本不支持时，使用完整安装包。\n\n' if updates else '') +
+        '首次安装或修复：\n'
+        '1. 下载下列完整安装文件，放在同一文件夹；不要改名。\n'
         '2. 双击其中的 Setup 可执行文件，按向导安装。\n'
         '   已安装旧版时可直接覆盖更新，无须先卸载；更新前请关闭软件并备份歌曲库。\n'
         '3. 不要单独打开或解压 .bin 文件，不需要安装 7-Zip。\n'
