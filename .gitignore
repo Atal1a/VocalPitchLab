@@ -1,14 +1,44 @@
-work/
-build/
-dist/
-input/
-outputs/
-results/
-models/
-library/
-datasets/
 .venv/
-bin/
+input/*
+results/*
+models/*
+work/*
+datasets/
+library/
 __pycache__/
 *.pyc
+# Generated listening pages contain song excerpts; do not publish them.
+outputs/
+build/
+dist/
+bin/
 .env
+.env.*
+*.pyo
+*.pdb
+
+# Public root documents. Keep local experiments and review records out of Git.
+/*.md
+!/README.md
+!/INSTALLATION.md
+!/CHANGELOG.md
+!/RELEASE_NOTES_*.md
+!/THIRD_PARTY_NOTICES.md
+!/MODEL_LICENSE_REVIEW.md
+/assets/BRAND.md
+
+# Publish maintained tests; older scripts depend on local songs and retired UIs.
+/tests/*
+!/tests/test_*.py
+!/tests/package_*.py
+!/tests/fixtures/
+/tests/fixtures/*
+!/tests/fixtures/package_offline/
+
+# Local launch helpers, experiment environments and installed dependencies.
+/Open-Review.cmd
+/Start.cmd
+/environment-lock.txt
+/requirements-experiments.txt
+/requirements-separation-experiments.txt
+/vendor/separation-runtime/

@@ -94,7 +94,6 @@ def main():
         f'/DInstalledSize={sum(r["bytes"] for r in new)}',
         str(ROOT/'installer/Update.iss')], out/'build.log')
     exe = next(out.glob('*.exe'))
-    (out/'SHA256SUMS.txt').write_text(f'{digest(exe)}  {exe.name}\n', encoding='utf-8')
     (out/'build-result.json').write_text(json.dumps(dict(build=metrics, bytes=exe.stat().st_size,
         sha256=digest(exe), changed_files=len(changes), reused_files=len(new)-len(changes)), indent=2))
     verify(stage, new); verify(old_dir, old)

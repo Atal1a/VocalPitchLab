@@ -7,12 +7,12 @@
 - `prepare_delivery.py` 汇集应用代码、运行库、模型及许可证文件。
 - `privacy_check.py` 检查内部文档、编译缓存和本机路径；额外检查名单由本地 JSON 文件传入，不纳入仓库。
 - `VocalPitchLab.iss` 生成安装程序，支持首次安装和覆盖更新。
-- `prepare_github_assets.py` 生成分卷校验文件与安装说明。
-- `prepare_source_bundle.py` 导出源码包，不包含歌曲、模型权重、用户数据和本机测试记录。
+- `prepare_github_assets.py` 检查发布附件并生成安装说明。
+- `prepare_source_bundle.py` 导出源码包，仅包含维护中的单元测试和安装包测试，不包含歌曲、模型权重、用户数据和旧实验脚本。生成压缩包前检查本机路径；`--deny-file` 可追加本地隐私检查名单。
 
-构建脚本使用项目下的 `work/`、`build/` 和 `dist/` 目录。依赖缓存、模型及构建工具需另行准备；源码仓库不包含这些大型文件。模型来源与使用条件见 `../THIRD_PARTY_NOTICES.md` 和 `../MODEL_LICENSE_REVIEW.md`。
+构建脚本使用项目下的 `work/`、`build/` 和 `dist/` 目录。依赖缓存、模型及构建工具需另行准备；源码仓库不包含这些大型文件。模型来源与使用条件见 [第三方说明](../THIRD_PARTY_NOTICES.md) 和 [模型许可记录](../MODEL_LICENSE_REVIEW.md)。
 
-GitHub 发布附件包括安装程序、分卷、更新包、源码包和安装说明。`SHA256SUMS.txt` 用于本地校验，不作为下载附件上传。
+GitHub 发布附件包括安装程序、分卷、更新包、源码包和安装说明。
 
 常规安装包构建使用 Ultra64 分组固实压缩：
 
@@ -34,9 +34,9 @@ python installer/prepare_delivery.py --version 1.1.1 --stage build/delivery-cand
 python installer/package_benchmark.py --stage build/delivery-candidate --output work/package-comparison --removals work/delivery-reports/optional-trim.json
 ```
 
-`package_benchmark.py` 比较 `fast`、`max`、`max-solid`、`ultra64-solid` 四种压缩配置。每组都会生成完整分卷安装包，安装到独立目录并核对文件 SHA-256。输出包含文件清单、体积、构建与安装耗时、进程树采样峰值内存及校验文件。内存值采用 100 毫秒采样，不代表精确瞬时峰值。
+`package_benchmark.py` 比较 `fast`、`max`、`max-solid`、`ultra64-solid` 四种压缩配置。每组都会生成完整分卷安装包，安装到独立目录并核对文件 SHA-256。构建结果记录附件清单、体积、构建与安装耗时及进程树采样峰值内存。内存值采用 100 毫秒采样，不代表精确瞬时峰值。
 
-常规构建使用 `--profiles ultra64-solid`；不传 `--profiles` 时比较全部配置。中断后使用 `--resume` 继续；输入文件必须保持一致。`--version` 指定安装器版本，`--compiler` 指定 Inno Setup 编译器。
+常规构建使用 `--profiles ultra64-solid`；不传 `--profiles` 时比较全部配置。中断后使用 `--resume` 继续；输入文件必须保持一致。恢复已完成的配置需要构建结果中包含附件记录，旧格式结果需另选目录重新构建。`--version` 指定安装器版本，`--compiler` 指定 Inno Setup 编译器。
 
 分组固实压缩按应用、模型、Python 依赖、PyTorch/CUDA 和 Qt 设置边界；微软运行组件使用独立压缩块。裁剪仅移除通过引用检查的 Qt 浏览器模块。模型及 GPU 运行库保持原样。覆盖安装根据裁剪清单清理旧文件，只有内容校验值匹配时才删除。
 

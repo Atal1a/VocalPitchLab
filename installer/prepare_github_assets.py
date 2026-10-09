@@ -33,8 +33,6 @@ def main():
         with path.open('rb') as source:
             digest = hashlib.file_digest(source, 'sha256').hexdigest()
         rows.append(dict(name=path.name, bytes=size, sha256=digest))
-    (OUT / 'SHA256SUMS.txt').write_text(
-        ''.join(f"{r['sha256']}  {r['name']}\n" for r in rows), encoding='ascii')
     names = '\n'.join(f"- {path.name}" for path in [setup, *volumes])
     (OUT / '安装说明.txt').write_text(
         f'VocalPitchLab {version} · Windows x64 离线安装包\n\n' +

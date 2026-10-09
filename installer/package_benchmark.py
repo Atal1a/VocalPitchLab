@@ -66,6 +66,21 @@ def verify(target,rows):
     if errors:raise RuntimeError(f'Installed files differ: {errors[:20]}')
     return dict(files=len(rows),all_hashes_match=True)
 
+def verify_assets(folder, rows):
+    if not rows:
+        raise RuntimeError('Saved result lacks asset records; choose a fresh output directory')
+    names = [row['name'] for row in rows]
+    if len(set(names)) != len(names) or any(Path(name).name != name or ':' in name for name in names):
+        raise RuntimeError('Invalid saved asset names')
+    actual = {p.name for p in folder.iterdir() if p.is_file() and p.suffix in ('.bin', '.exe')}
+    if actual != set(names):
+        raise RuntimeError('Completed asset list changed; choose a fresh output directory')
+    for row in rows:
+        asset = folder / row['name']
+        if asset.stat().st_size != row['bytes'] or digest(asset) != row['sha256']:
+            raise RuntimeError('Completed asset changed; choose a fresh output directory')
+
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--stage',type=Path,required=True);ap.add_argument('--output',type=Path,required=True)
@@ -102,10 +117,8 @@ def main():
     for profile in args.profiles:
         if any(r['profile']==profile for r in results):
             completed=output/profile
-            for line in (completed/'SHA256SUMS.txt').read_text().splitlines():
-                expected,name=line.split('  ',1)
-                asset=completed/name
-                if not asset.is_file() or digest(asset)!=expected:raise RuntimeError('Completed asset changed; choose a fresh output directory')
+            saved=next(r for r in results if r['profile']==profile)
+            verify_assets(completed,saved.get('assets'))
             verify(completed/'安装验证 with spaces',rows)
             print('VERIFIED existing '+profile,flush=True)
             continue
@@ -115,7 +128,7 @@ def main():
         build=measure([str(args.compiler),'/Q',f'/DStageDir={stage}',f'/DAppVersion={args.version}',f'/DCompressionProfile={profile}',f'/DPackageOutputDir={dest}',f'/DPackageFilesInclude={include}',f'/DObsoleteFilesInclude={obsolete}','/DGithubAssets',str(ROOT/'installer/VocalPitchLab.iss')],dest/'build.log')
         assets=sorted(p for p in dest.iterdir() if p.suffix in ('.bin','.exe'))
         if not assets or any(p.stat().st_size>=2*1024**3 for p in assets):raise RuntimeError('Missing assets or GitHub asset size limit exceeded')
-        (dest/'SHA256SUMS.txt').write_text(''.join(f'{digest(p)}  {p.name}\n' for p in assets))
+        asset_records=[dict(name=p.name,bytes=p.stat().st_size,sha256=digest(p)) for p in assets]
         target=dest/'安装验证 with spaces';exe=next(p for p in assets if p.suffix=='.exe')
         print('INSTALL '+profile,flush=True)
         install=measure([str(exe),'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/NOICONS','/PACKAGEVALIDATION=1','/NOCLOSEAPPLICATIONS',f'/DIR={target}',f'/LOG={dest / "setup.log"}'],dest/'install.log')
@@ -123,7 +136,7 @@ def main():
         privacy=inspect(target,json.loads(args.deny_file.read_text(encoding='utf-8')) if args.deny_file else [])
         (dest/'privacy.json').write_text(json.dumps(privacy,indent=2),encoding='utf-8')
         if not privacy['passed']:raise RuntimeError('Installed package contains disallowed content; see privacy.json')
-        result=dict(profile=profile,compiler_sha256=digest(args.compiler),installer_source_sha256=digest(ROOT/'installer/VocalPitchLab.iss'),download_bytes=sum(p.stat().st_size for p in assets),installed_payload_bytes=sum(r['bytes'] for r in rows),build=build,install=install,verification=check)
+        result=dict(profile=profile,assets=asset_records,compiler_sha256=digest(args.compiler),installer_source_sha256=digest(ROOT/'installer/VocalPitchLab.iss'),download_bytes=sum(p.stat().st_size for p in assets),installed_payload_bytes=sum(r['bytes'] for r in rows),build=build,install=install,verification=check)
         results.append(result);(output/'results.json').write_text(json.dumps(results,indent=2));print(json.dumps(result),flush=True)
     if manifest(stage)!=rows:raise RuntimeError('Input stage changed during benchmark')
 

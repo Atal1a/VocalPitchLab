@@ -4,7 +4,7 @@
 
 ## 安装
 
-1. 从 [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest) 下载同一版本的 `setup.exe` 和全部配套 `.bin` 分卷，放在同一文件夹，保持原文件名。
+1. 从 [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest) 或 [夸克网盘](https://pan.quark.cn/s/fec1530accea) 下载同一版本的 `setup.exe` 和全部配套 `.bin` 分卷，放在同一文件夹，保持原文件名。
 2. 双击 `setup.exe`，按向导完成安装。无需单独解压分卷，无需配置 Python 或 CUDA Toolkit。
 3. 如果系统缺少必要的微软运行组件，安装程序会离线补装。此时 Windows 可能请求管理员权限；已有足够新版本时会跳过。
 4. 如果提示需要重启，先保存其他工作，再重启 Windows 并重新运行安装程序。
