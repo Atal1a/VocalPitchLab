@@ -2,7 +2,7 @@
   #error StageDir must point to a prepared application directory
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.1.1"
+  #define AppVersion "1.1.2"
 #endif
 #ifndef CompressionProfile
   #define CompressionProfile "ultra64-solid"
@@ -43,7 +43,11 @@ OutputDir=..\dist\VocalPitchLab-{#AppVersion}-windows-x64
 OutputDir=..\dist
 #endif
 #endif
+#ifdef SingleFileOffline
+OutputBaseFilename=VocalPitchLab-{#AppVersion}-windows-x64-offline-setup
+#else
 OutputBaseFilename=VocalPitchLab-{#AppVersion}-windows-x64-setup
+#endif
 Compression={#CompressionMethod}
 SolidCompression={#SolidMode}
 #ifdef GithubAssets

@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import time
+import tempfile
 import uuid
 
 from vocalpitchlab.runtime.paths import DATA_ROOT
@@ -77,8 +78,7 @@ def stage(name, signature, producer):
                 return paths, dict(key=key, content={k:v['sha256'] for k,v in saved['files'].items()}, hit=True, seconds=0)
         except (OSError, ValueError, KeyError, TypeError):
             pass
-        work = folder / ('work-' + uuid.uuid4().hex)
-        work.mkdir()
+        work = Path(tempfile.mkdtemp(prefix='w-', dir=folder))
         start = time.perf_counter()
         paths = {k: Path(v) for k, v in producer(work).items()}
         if not paths or not all(p.resolve().is_relative_to(work.resolve()) and p.is_file() and p.stat().st_size > 0 for p in paths.values()):

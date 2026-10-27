@@ -25,8 +25,17 @@ UsePreviousAppDir=yes
 UsePreviousGroup=yes
 OutputDir={#UpdateDir}
 OutputBaseFilename=VocalPitchLab-{#AppVersion}-windows-x64-update-from-{#FromVersion}
+#ifdef RuntimeUpdate
+Compression=lzma2/ultra64
+DiskSpanning=yes
+DiskSliceSize=1500000000
+#else
 Compression=lzma2/max
+#endif
 SolidCompression=yes
+#ifdef BackupSize
+ExtraDiskSpaceRequired={#BackupSize}
+#endif
 SetupIconFile=..\assets\vocalpitch.ico
 UninstallDisplayIcon={app}\assets\vocalpitch.ico
 #ifdef InstalledSize

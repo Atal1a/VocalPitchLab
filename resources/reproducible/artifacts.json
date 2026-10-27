@@ -668,13 +668,13 @@
     "publisher_hash_verified": true
   },
   {
-    "file": "sympy-1.13.1-py3-none-any.whl",
+    "file": "sympy-1.14.0-py3-none-any.whl",
     "name": "sympy",
-    "version": "1.13.1",
-    "sha256": "db36cdc64bf61b9b24578b6f7bab1ecdd2452cf008f34faa33776680c26d66f8",
-    "bytes": 6189177,
+    "version": "1.14.0",
+    "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5",
+    "bytes": 6299353,
     "group": "wheels",
-    "url": "https://files.pythonhosted.org/packages/b2/fe/81695a1aa331a842b582453b605175f419fe8540355886031328089d840a/sympy-1.13.1-py3-none-any.whl",
+    "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
     "publisher_hash_verified": true
   },
   {
@@ -688,13 +688,13 @@
     "publisher_hash_verified": true
   },
   {
-    "file": "torch-2.5.1+cu124-cp312-cp312-win_amd64.whl",
+    "file": "torch-2.7.1+cu128-cp312-cp312-win_amd64.whl",
     "name": "torch",
-    "version": "2.5.1+cu124",
-    "sha256": "3c3f705fb125edbd77f9579fa11a138c56af8968a10fc95834cdd9fdf4f1f1a6",
-    "bytes": 2510680879,
+    "version": "2.7.1+cu128",
+    "sha256": "2bb8c05d48ba815b316879a18195d53a6472a03e297d971e916753f8e1053d30",
+    "bytes": 3273024349,
     "group": "wheels",
-    "url": "https://download-r2.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp312-cp312-win_amd64.whl#sha256=3c3f705fb125edbd77f9579fa11a138c56af8968a10fc95834cdd9fdf4f1f1a6",
+    "url": "https://download-r2.pytorch.org/whl/cu128/torch-2.7.1%2Bcu128-cp312-cp312-win_amd64.whl#sha256=2bb8c05d48ba815b316879a18195d53a6472a03e297d971e916753f8e1053d30",
     "publisher_hash_verified": true
   },
   {
@@ -708,13 +708,13 @@
     "publisher_hash_verified": true
   },
   {
-    "file": "torchaudio-2.5.1+cu124-cp312-cp312-win_amd64.whl",
+    "file": "torchaudio-2.7.1+cu128-cp312-cp312-win_amd64.whl",
     "name": "torchaudio",
-    "version": "2.5.1+cu124",
-    "sha256": "cca2de94f232611b20d379edf28befa7a1aa482ae9ed41c3b958b08ed1bf4983",
-    "bytes": 4139804,
+    "version": "2.7.1+cu128",
+    "sha256": "4586e3106701b06a4f9377f5c1da9e1d8555e16bd58fd7d810aa3f6cf50bd713",
+    "bytes": 4655660,
     "group": "wheels",
-    "url": "https://download-r2.pytorch.org/whl/cu124/torchaudio-2.5.1%2Bcu124-cp312-cp312-win_amd64.whl#sha256=cca2de94f232611b20d379edf28befa7a1aa482ae9ed41c3b958b08ed1bf4983",
+    "url": "https://download-r2.pytorch.org/whl/cu128/torchaudio-2.7.1%2Bcu128-cp312-cp312-win_amd64.whl#sha256=4586e3106701b06a4f9377f5c1da9e1d8555e16bd58fd7d810aa3f6cf50bd713",
     "publisher_hash_verified": true
   },
   {

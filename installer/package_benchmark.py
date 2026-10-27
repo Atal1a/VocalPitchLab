@@ -84,7 +84,7 @@ def verify_assets(folder, rows):
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--stage',type=Path,required=True);ap.add_argument('--output',type=Path,required=True)
-    ap.add_argument('--deny-file',type=Path);ap.add_argument('--resume',action='store_true');ap.add_argument('--removals',type=Path);ap.add_argument('--version',default='1.1.1');ap.add_argument('--profiles',nargs='+',choices=PROFILES,default=list(PROFILES))
+    ap.add_argument('--deny-file',type=Path);ap.add_argument('--resume',action='store_true');ap.add_argument('--removals',type=Path);ap.add_argument('--version',default='1.1.2');ap.add_argument('--profiles',nargs='+',choices=PROFILES,default=list(PROFILES))
     ap.add_argument('--compiler',type=Path,default=ROOT/'work/installer-tools/inno/ISCC.exe')
     args=ap.parse_args();stage=args.stage.resolve();output=args.output.resolve()
     required=('VocalPitchLab.exe','main.py','runtime/python.exe','models','qml','vocalpitchlab','vendor')

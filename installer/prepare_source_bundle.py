@@ -8,7 +8,7 @@ from application_files import SOURCE_FILES, VENDOR
 from privacy_check import ignore_private_files, inspect
 
 ROOT=Path(__file__).resolve().parents[1]
-OUT=ROOT/'work/github-source-1.1.1'
+OUT=ROOT/'work/github-source-1.1.2'
 
 def copy(src,dst):
     dst.parent.mkdir(parents=True,exist_ok=True)
@@ -18,7 +18,7 @@ def copy(src,dst):
 def main():
     global OUT
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version',default='1.1.1')
+    parser.add_argument('--version',default='1.1.2')
     parser.add_argument('--output',type=Path)
     parser.add_argument('--archive-dir',type=Path,default=ROOT/'dist')
     parser.add_argument('--deny-file',type=Path,help='Local JSON list of private strings to reject before archiving')
@@ -47,7 +47,7 @@ def main():
     if not audit['passed']:
         raise SystemExit('Source export privacy check failed: '+json.dumps(audit['findings']))
     archive=args.archive_dir.resolve()/f'VocalPitchLab-{args.version}-source'
-    archive.parent.mkdir(exist_ok=True)
+    archive.parent.mkdir(parents=True,exist_ok=True)
     shutil.make_archive(str(archive),'zip',OUT)
     print(OUT)
 

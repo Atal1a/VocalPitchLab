@@ -74,7 +74,10 @@ def separate(audio,sr,device,folder,lead=False):
             # duration lookup, retaining its validation, normalization and atomic export.
             model.model_instance.write_audio=model.model_instance.write_audio_soundfile
             inference_start=time.perf_counter()
-            paths=model.separate(str(source));path=Path(paths[0]);path=path if path.is_absolute() else work/path
+            # Keep upstream atomic export paths below the Windows path limit in
+            # long user profiles; the cache already identifies model and input.
+            paths=model.separate(str(source),custom_output_names={'Vocals':'v'})
+            path=Path(paths[0]);path=path if path.is_absolute() else work/path
             separation_seconds=time.perf_counter()-inference_start
             read_start=time.perf_counter()
             voice,rate=sf.read(path,dtype='float32',always_2d=True);voice/=gain

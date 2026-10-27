@@ -41,11 +41,9 @@ var
   ExitCode: Integer;
 begin
   Result := '';
-  if VCRestartPending then begin
-    NeedsRestart := True;
-    Result := '运行组件需要重启。请重启 Windows 后重新运行安装程序。';
-    Exit;
-  end;
+  { A successful prerequisite may require a reboot, but copying the application
+    can finish first. NeedRestart reports that requirement on the final page. }
+  if VCRestartPending then Exit;
   if HasVCRuntime then Exit;
   WizardForm.PreparingLabel.Caption := '正在安装必要的运行组件，请稍候。系统可能请求管理员权限。';
   ExtractTemporaryFile('vpl-vc-redist.x64.exe');
@@ -70,11 +68,15 @@ begin
   Log('VC++ runtime installer exit code: ' + IntToStr(ExitCode));
   if (ExitCode = 3010) or (ExitCode = 1641) then begin
     VCRestartPending := True;
-    NeedsRestart := True;
-    Result := '运行组件需要重启。请保存工作、重启 Windows，然后重新运行安装程序。';
+    Log('VC++ runtime restart deferred until application installation completes.');
     Exit;
   end;
   if ((ExitCode = 0) or (ExitCode = 1638)) and HasVCRuntime then Exit;
   Result := '必要运行组件安装未完成（代码 ' + IntToStr(ExitCode) + '）。请重试。' + #13#10 +
     '诊断日志：' + LogFile;
+end;
+
+function NeedRestart: Boolean;
+begin
+  Result := VCRestartPending;
 end;

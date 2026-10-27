@@ -1,5 +1,8 @@
 """Qt Quick frontend bridge. Analysis stays in the existing Python worker."""
 import csv,json,sys,uuid,subprocess,math,os,time
+from vocalpitchlab.runtime.paths import APP_ROOT, DATA_ROOT, prepare, worker_python
+from vocalpitchlab.runtime.playback import configure_backend
+configure_backend(DATA_ROOT)
 from vocalpitchlab.ui.plot_support import PresentationClock, lod_stride, stable_envelope, vocal_loudness, melody_outline, vocal_gain
 # Python paint callbacks must share the GUI thread; a threaded scene graph can
 # deadlock synchronous window grabs while the GUI thread holds Python's GIL.
@@ -12,7 +15,6 @@ from PySide6.QtQml import QQmlApplicationEngine,qmlRegisterType
 from PySide6.QtQuick import QQuickPaintedItem
 from PySide6.QtMultimedia import QMediaPlayer,QAudioOutput
 
-from vocalpitchlab.runtime.paths import APP_ROOT, DATA_ROOT, prepare, worker_python
 ROOT=APP_ROOT
 prepare()
 FORMATS={'.mp3','.wav','.flac','.m4a','.aac','.ogg','.wma','.aiff'}
@@ -37,7 +39,7 @@ class Controller(QObject):
             choices=sorted((DATA_ROOT/'results').glob('rmvpe-*/index.json')) if bootstrap else []
             self.data=json.loads(choices[-1].read_text(encoding='utf-8')) if choices else {'songs':[]}
         self.data.setdefault('jobs',[])
-        self.settings=dict(theme='system',hoverNotes=True,liveNotes=True,liveCurve=True,blocks=True,curve=True,volume=.65,pianoVolume=.65,pitchModel='tracked',noteMode='game',separationModel='mel_bs')
+        self.settings=dict(theme='system',hoverNotes=True,liveNotes=True,liveCurve=True,blocks=True,curve=True,volume=.65,pianoVolume=.65,pitchModel='tracked',noteMode='game',separationModel='mel_bs',compatiblePlayback=False)
         self.settings.update(self.data.get('settings',{}));self.trash=[]
         self.settings.update(pitchModel='tracked',noteMode='game')
         if self.settings.get('pipelineVersion')!='lead-default-v1':
@@ -174,6 +176,10 @@ class Controller(QObject):
     def setting(self,key,value):
         if key not in self.settings:return
         if key in ['pitchModel','noteMode','pipelineVersion']:return
+        if key=='compatiblePlayback':
+            if not isinstance(value,bool) or self.settings[key]==value:return
+            self.settings[key]=value;self.save()
+            self.feedback('兼容播放设置已保存，重启软件后生效。');return
         if key=='separationModel':
             if value not in ['mel_bs','mel_roformer']:return
             if not self.high_quality_available:self.feedback('人声模型尚未安装。');return
@@ -841,20 +847,27 @@ class PitchView(QQuickPaintedItem):
         p.fillRect(self.boundingRect(),QColor(bg));p.setFont(QFont('Microsoft YaHei',9))
         visible=[n for n in b.notes if n['end']>=left and n['start']<=right]
         active=next((n for n in visible if n['start']<=b.t<n['end']),None)
-        hovered=None
-        if self.hover_point and b.settings['hoverNotes'] and b.show_blocks:
+        hovered=None;key_pitch=None;key_notes=[]
+        if self.hover_point and b.settings['hoverNotes']:
             hx,hy=self.hover_point
-            if x0<=hx<=x0+w and y0<=hy<=y0+h:
+            if 0<=hx<x0 and y0<=hy<=y0+h:
+                key_pitch=int(round(b.high-(hy-y0)/h*(b.high-b.low)))
+                if b.show_blocks:key_notes=[n for n in visible if n['midi']==key_pitch]
+            elif b.show_blocks and x0<=hx<=x0+w and y0<=hy<=y0+h:
                 hovered=next((n for n in visible if x(n['start'])-2<=hx<=x(n['end'])+2 and abs(hy-y(n['midi']))<=max(6,h*.4/(b.high-b.low))),None)
         highlighted=hovered or (active if b.settings['liveNotes'] else None)
+        highlighted_pitch=key_pitch if key_pitch is not None else highlighted['midi'] if highlighted else None
         p.save();p.setClipRect(QRectF(0,y0,self.width(),h))
         for midi in range(math.floor(b.low),math.ceil(b.high)+1):
             row=QRectF(x0,y(midi+.5),w,h/(b.high-b.low))
             if midi%12 in [1,3,6,8,10]:p.fillRect(row,QColor(band))
+            if key_notes and midi==key_pitch:
+                tint=QColor('#6badff' if dark else '#0071e3');tint.setAlpha(24 if dark else 16)
+                p.fillRect(row,tint)
             p.setPen(QPen(QColor(grid),.5));p.drawLine(QPointF(x0,y(midi)),QPointF(x0+w,y(midi)))
             key_color=('#29364c' if dark else '#eaf0f8') if midi%12 in [1,3,6,8,10] else bg
             p.fillRect(QRectF(3,y(midi+.5)+.5,55,h/(b.high-b.low)-1),QColor(key_color))
-            selected=(highlighted and midi==highlighted['midi']) or (b.preview_note==midi and time.monotonic()<b.preview_until)
+            selected=(midi==highlighted_pitch) or (b.preview_note==midi and time.monotonic()<b.preview_until)
             if selected:p.fillRect(QRectF(3,y(midi+.5),55,h/(b.high-b.low)),QColor('#3c6795' if dark else '#d0e5ff'))
             step=max(1,math.ceil((b.high-b.low)*13/h))
             if (midi%step==0 or selected) and y0+8<=y(midi)<=y0+h-8:
@@ -871,18 +884,33 @@ class PitchView(QQuickPaintedItem):
         if cached_layer:
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform,True)
             p.drawImage(QPointF(x0-left/span*w,y0),self.long_curve_layer(span,w,h,color))
+            if b.show_blocks:
+                selected_path=QPainterPath()
+                for n in visible:
+                    if n is hovered or n is active or n['midi']==key_pitch:
+                        nh=max(3,min(20,h*.64/(b.high-b.low)))
+                        rect=QRectF(x(n['start']),y(n['midi'])-nh/2,max(1.5,x(n['end'])-x(n['start'])),nh)
+                        self.draw_block(p,rect,dark,True);selected_path.addRect(rect)
+                if b.show_curve and not selected_path.isEmpty():
+                    # Preserve the curve above selected blocks without invalidating the overview cache.
+                    p.save();p.setClipPath(selected_path,Qt.ClipOperation.IntersectClip)
+                    times,values=self.curve_samples(b.primary,span,w);a,c=np.searchsorted(times,[left,right])
+                    self.draw_curve(p,times[max(0,a-1):c+1],values[max(0,a-1):c+1],x,y,dark);p.restore()
         else:
             if b.show_blocks:
                 for n in visible:
                     nh=max(3,min(20,h*.64/(b.high-b.low)))
                     rect=QRectF(x(n['start']),y(n['midi'])-nh/2,max(1.5,x(n['end'])-x(n['start'])),nh)
-                    self.draw_block(p,rect,dark,n is hovered or n is active)
+                    self.draw_block(p,rect,dark,n is hovered or n is active or n['midi']==key_pitch)
             if b.show_curve:
                 times,values=self.curve_samples(b.primary,span,w);a,c=np.searchsorted(times,[left,right])
                 self.draw_curve(p,times[max(0,a-1):c+1],values[max(0,a-1):c+1],x,y,dark)
-        if hovered:
-            pen=QPen(QColor('#77b8ff' if dark else '#318ce8'),1);pen.setStyle(Qt.PenStyle.DashLine);p.setPen(pen)
-            p.drawLine(QPointF(x0,y(hovered['midi'])),QPointF(x(hovered['start']),y(hovered['midi'])))
+        guide=hovered or (min(key_notes,key=lambda n:n['start']) if key_notes else None)
+        if guide:
+            guide_color=QColor('#77b8ff' if dark else '#318ce8')
+            if key_pitch is not None:guide_color.setAlpha(100)
+            pen=QPen(guide_color,.8 if key_pitch is not None else 1);pen.setStyle(Qt.PenStyle.DashLine);p.setPen(pen)
+            p.drawLine(QPointF(x0,y(guide['midi'])),QPointF(max(x0,x(guide['start'])),y(guide['midi'])))
         if b.loop:
             for edge,label in [(b.loop_a,'A'),(b.loop_b,'B')]:
                 p.setPen(QPen(QColor('#6badff' if dark else '#0071e3'),1.3));p.drawLine(QPointF(x(edge),y0),QPointF(x(edge),y0+h))

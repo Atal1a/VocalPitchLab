@@ -223,7 +223,7 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
-var I: Integer; Rel: String;
+var I: Integer; Rel, Actual: String;
 begin
   if CurStep = ssInstall then begin
     if not Prepared or ApplicationRunning then begin
@@ -237,7 +237,25 @@ begin
       end;
   end;
   if CurStep = ssPostInstall then begin
-    { Replacements were hashed by their AfterInstall callbacks before commit. }
+    { Obsolete files are part of the backed-up transaction, including old wheel metadata. }
+    if not UpdateFailed then begin
+      try
+        for I := 0 to GetArrayLength(Removed)-1 do begin
+          Rel := AppFile(Field(Removed[I], 0));
+          if not SafeTree(Rel) then RaiseException('更新目录发生变化，请重新运行更新包。');
+          Actual := Hash(Rel);
+          if Actual <> '-' then begin
+            if Actual <> Field(Removed[I], 1) then RaiseException('旧文件已发生变化，请使用完整安装包修复。');
+            if not DeleteFile(Rel) then RaiseException('无法替换旧运行库，请关闭软件后重试。');
+          end;
+        end;
+        for I := 0 to GetArrayLength(Checks)-1 do
+          if Hash(AppFile(Field(Checks[I], 0))) <> Field(Checks[I], 2) then
+            RaiseException('更新完成检查失败，请重新运行更新包。');
+      except
+        UpdateFailed := True; FailureText := GetExceptionMessage;
+      end;
+    end;
     if not UpdateFailed then
       if not SaveStringToFile(BackupDir + '\committed', '1', False) then begin
         UpdateFailed := True; FailureText := '无法保存更新完成状态。';
@@ -251,11 +269,6 @@ begin
       Exit;
     end;
     Committed := True;
-    for I := 0 to GetArrayLength(Removed)-1 do begin
-      Rel := AppFile(Field(Removed[I], 0));
-      if SafeTree(Rel) and (Hash(Rel) = Field(Removed[I], 1)) then
-        if not DeleteFile(Rel) then Log('Retained obsolete file: ' + Field(Removed[I], 0));
-    end;
     ClearBackup;
   end;
 end;

@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="RELEASE_NOTES_1.1.1.md"><img src="docs/images/badge-version.svg" alt="版本 1.1.1" height="28"></a>
+  <a href="RELEASE_NOTES_1.1.2.md"><img src="docs/images/badge-version.svg" alt="版本 1.1.2" height="28"></a>
   <a href="INSTALLATION.md"><img src="docs/images/badge-platform.svg" alt="Windows x64" height="28"></a>
   <a href="LICENSE"><img src="docs/images/badge-license.svg" alt="GPL-3.0-only" height="28"></a>
 </p>
@@ -50,20 +50,22 @@
 
 | 功能 | 可以做什么 |
 | :--- | :--- |
-| **人声与原曲** | 切换原曲和分离人声；按歌曲开启或关闭和声分离。 |
+| **人声与原曲** | 切换原曲和分离人声；按歌曲开启或关闭和声分离；支持兼容播放模式。 |
 | **播放与视图** | 循环播放、调整音量，缩放时间与音域，或使用自适应视图。 |
 | **歌曲库** | 导入与批量管理歌曲，保存分析结果和查看位置。 |
 | **界面主题** | 支持浅色与深色主题。 |
 
 ## 开始使用
 
-1. 从 [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest) 或 [夸克网盘](https://pan.quark.cn/s/fec1530accea) 下载同一版本的 `setup.exe` 和**全部 `.bin` 分卷**，放在同一文件夹，保持原文件名。
-2. 运行 `setup.exe` 完成安装，无需单独解压分卷，也无需配置 Python 或 CUDA Toolkit。
+1. 从 [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest) 下载同一版本的安装程序和**全部 `.bin` 分卷**，放在同一文件夹，保持原文件名；或从 [夸克网盘](https://pan.quark.cn/s/fec1530accea) 下载单文件完整安装包。
+2. 运行安装程序完成安装，无需配置 Python 或 CUDA Toolkit。已有用户先关闭软件，再覆盖安装到原目录，无须先卸载。
 3. 打开 VocalPitchLab，点击「导入歌曲」，等待分析完成后播放、查看和比对。
 
-兼容的 NVIDIA 显卡和驱动可以加速分析；没有可用的 GPU 加速时会使用 CPU，分析明显较慢。首次安装、从 1.1.0 更新及常见问题，见 [安装说明](INSTALLATION.md)。
+兼容的 NVIDIA 显卡和驱动可以加速分析；没有可用的 GPU 加速时会使用 CPU，分析明显较慢。首次安装、覆盖更新及常见问题，见 [安装说明](INSTALLATION.md)。
 
 部分合唱或高音叠唱可能被和声分离削弱，此时可将当前歌曲的「和声分离」切换为「关」。
+
+原曲或人声无声时，可在设置中开启「兼容播放」，完全退出后重新启动软件，无须重新分析。
 
 ## 开发与许可
 

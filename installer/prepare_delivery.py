@@ -9,9 +9,10 @@ from pathlib import Path
 from application_files import SOURCE_FILES, RESOURCES, VENDOR
 from trim_runtime import trim
 from privacy_check import ignore_private_files, inspect
+from gpu_runtime import validate_gpu_dependencies
 
 ROOT = Path(__file__).resolve().parents[1]
-STAGE = ROOT / 'build/delivery-1.1.1'
+STAGE = ROOT / 'build/delivery-1.1.2-final'
 CLEAN = ROOT / 'work/repro-build/app'
 BASE = ROOT / 'build/slim-preview/runtime'
 
@@ -25,7 +26,7 @@ def copy(src, dst):
 def main():
     global STAGE, CLEAN, BASE
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='1.1.1')
+    parser.add_argument('--version', default='1.1.2')
     parser.add_argument('--stage', type=Path, default=STAGE)
     parser.add_argument('--dependencies', type=Path, default=CLEAN)
     parser.add_argument('--base-runtime', type=Path, default=BASE)
@@ -44,6 +45,7 @@ def main():
         raise SystemExit('Delivery stage already exists; choose a fresh stage directory')
     if not CLEAN.is_dir() or not BASE.is_dir():
         raise SystemExit('Prepared dependency and base runtime directories are required')
+    validate_gpu_dependencies(CLEAN/'runtime/Lib/site-packages')
     if reports.exists() and any(reports.iterdir()):
         raise SystemExit('Choose a fresh report directory')
     reports.mkdir(parents=True, exist_ok=True)
