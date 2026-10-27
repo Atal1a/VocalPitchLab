@@ -1,5 +1,6 @@
 """Record downloaded wheel hashes and verify publisher checksums before reuse."""
 import concurrent.futures
+import argparse
 import email
 import hashlib
 import html
@@ -29,7 +30,10 @@ def record(path):
     result = dict(file=path.name, name=meta['Name'], version=meta['Version'], sha256=digest,
                   bytes=path.stat().st_size, group=path.parent.name)
     if meta['Name'].lower() in ['torch', 'torchaudio']:
-        index = 'https://download.pytorch.org/whl/cu124/' + meta['Name'].lower() + '/'
+        variant = meta['Version'].partition('+')[2]
+        if not re.fullmatch(r'cu\d+', variant):
+            raise ValueError('Expected an official CUDA wheel: ' + path.name)
+        index = f'https://download.pytorch.org/whl/{variant}/' + meta['Name'].lower() + '/'
         links = re.findall(r'href="([^"]+)"', fetch(index).decode())
         link = next(html.unescape(s) for s in links
                     if urllib.parse.unquote(urllib.parse.urlsplit(html.unescape(s)).path).endswith('/'+path.name))
@@ -58,6 +62,10 @@ def record(path):
 
 
 def main():
+    global WORK
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--artifacts', type=Path, default=WORK)
+    WORK = parser.parse_args().artifacts.resolve()
     paths = sorted((WORK/'wheels').glob('*.whl')) + sorted((WORK/'vendor-wheels').glob('*.whl'))
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
         records = list(pool.map(record, paths))

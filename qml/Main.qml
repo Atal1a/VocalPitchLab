@@ -74,34 +74,42 @@ ApplicationWindow {
                     AppButton { text: "全选"; onClicked: { let a=[]; for(let i=0;i<backend.songs.length;i++) a.push(i); selectedSongs=a } }
                     AppButton { objectName: "deleteButton"; text: "移除 " + selectedSongs.length; enabled: selectedSongs.length > 0; tip: "只移出歌曲库，保留原文件"; onClicked: { backend.deleteSongs(selectedSongs); selectedSongs=[] } }
                 }
-                ListView {
-                    id: songList; objectName: "songList"; Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 6; model: backend.songs
-                    boundsBehavior: Flickable.StopAtBounds
-                    delegate: Rectangle {
-                        id: songRow
-                        required property var modelData
-                        objectName: "songRow" + modelData.index
-                        property bool current: s.selected === modelData.index
-                        property bool chosen: managing && selectedSongs.indexOf(modelData.index)>=0
-                        property bool hovered: songHover.hovered || songMouse.containsMouse
-                        width: ListView.view.width; height: 64; radius: 12
-                        color: (chosen || current) ? (hovered ? Theme.songSelectedHover : Theme.songSelected) : (hovered ? Theme.songHover : "transparent")
-                        border.color: hovered ? Theme.songHoverBorder : "transparent"; border.width: 1
-                        Rectangle { visible: songRow.current; anchors.left: parent.left; anchors.leftMargin: 1; anchors.verticalCenter: parent.verticalCenter; width: 3; height: 24; radius: 1.5; color: Theme.accent }
-                        Rectangle { visible: managing; x: 9; anchors.verticalCenter: parent.verticalCenter; width: 13; height: 13; radius: 4; color: selectedSongs.indexOf(modelData.index)>=0 ? Theme.accent : "transparent"; border.color: Theme.muted }
-                        Column { anchors.left: parent.left; anchors.leftMargin: managing ? 31 : 12; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 5
-                            Text { width: parent.width; text: modelData.name; elide: Text.ElideRight; color: Theme.text; font.pixelSize: 14; font.bold: s.selected === modelData.index }
-                            Text { text: modelData.duration; color: Theme.muted; font.pixelSize: 11 }
-                        }
-                        HoverHandler { id: songHover; cursorShape: Qt.PointingHandCursor }
-                        MouseArea { id: songMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
-                            onClicked: function(mouse) {
-                                if (mouse.button === Qt.RightButton) { let p=songRow.mapToItem(win.contentItem,mouse.x,mouse.y); songContext.targetIndex=modelData.index; songContext.x=p.x; songContext.y=p.y; songContext.open() }
-                                else chooseSong(modelData.index,mouse.modifiers)
+                Item {
+                    id: songListFrame; Layout.fillWidth: true; Layout.fillHeight: true
+                    ListView {
+                        id: songList; objectName: "songList"; anchors.fill: parent; clip: true; spacing: 6; model: backend.songs
+                        boundsBehavior: Flickable.StopAtBounds
+                        delegate: Rectangle {
+                            id: songRow
+                            required property var modelData
+                            objectName: "songRow" + modelData.index
+                            property bool current: s.selected === modelData.index
+                            property bool chosen: managing && selectedSongs.indexOf(modelData.index)>=0
+                            property bool hovered: songHover.hovered || songMouse.containsMouse
+                            width: ListView.view.width; height: 64; radius: 12
+                            color: (chosen || current) ? (hovered ? Theme.songSelectedHover : Theme.songSelected) : (hovered ? Theme.songHover : "transparent")
+                            border.color: hovered ? Theme.songHoverBorder : "transparent"; border.width: 1
+                            Rectangle { visible: songRow.current; anchors.left: parent.left; anchors.leftMargin: 1; anchors.verticalCenter: parent.verticalCenter; width: 3; height: 24; radius: 1.5; color: Theme.accent }
+                            Rectangle { visible: managing; x: 9; anchors.verticalCenter: parent.verticalCenter; width: 13; height: 13; radius: 4; color: selectedSongs.indexOf(modelData.index)>=0 ? Theme.accent : "transparent"; border.color: Theme.muted }
+                            Column { anchors.left: parent.left; anchors.leftMargin: managing ? 31 : 12; anchors.right: parent.right; anchors.rightMargin: 12; anchors.verticalCenter: parent.verticalCenter; spacing: 5
+                                Text { width: parent.width; text: modelData.name; elide: Text.ElideRight; color: Theme.text; font.pixelSize: 14; font.bold: s.selected === modelData.index }
+                                Text { text: modelData.duration; color: Theme.muted; font.pixelSize: 11 }
+                            }
+                            HoverHandler { id: songHover; cursorShape: Qt.PointingHandCursor }
+                            MouseArea { id: songMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) { let p=songRow.mapToItem(win.contentItem,mouse.x,mouse.y); songContext.targetIndex=modelData.index; songContext.x=p.x; songContext.y=p.y; songContext.open() }
+                                    else chooseSong(modelData.index,mouse.modifiers)
+                                }
                             }
                         }
+                        ScrollBar.vertical: ScrollBar {
+                            objectName: "songScrollBar"; parent: songListFrame
+                            x: songList.x + songList.width + 6; y: songList.y; width: 6; height: songList.height
+                            visible: songList.contentHeight > songList.height
+                            contentItem: Rectangle { implicitWidth: 4; radius: 2; color: Theme.muted; opacity: .5 }
+                        }
                     }
-                    ScrollBar.vertical: ScrollBar { visible: songList.contentHeight > songList.height; contentItem: Rectangle { implicitWidth: 4; radius: 2; color: Theme.muted; opacity: .5 } }
                 }
                 ListView {
                     Layout.fillWidth: true; Layout.preferredHeight: Math.min(contentHeight,100); model: backend.jobs; clip: true
@@ -228,7 +236,7 @@ ApplicationWindow {
                         }
                         AppButton { objectName: "loopButton"; text: s.loop ? "循环中" : "循环"; primary: s.loop; onClicked: { if (!loopEditor) { backend.prepareLoop(); focusLoop() } loopEditor = !loopEditor } }
                         Item { Layout.fillWidth: true }
-                        AppButton { objectName: "muteButton"; text: s.muted ? "静音" : "音量"; tip: "歌曲音量与静音；钢琴试听独立播放"; onClicked: backend.toggleMute() }
+                        AppButton { objectName: "muteButton"; text: s.muted ? "静音" : "音量"; onClicked: backend.toggleMute() }
                         TrackSlider { objectName: "volumeBar"; Layout.preferredWidth: 110; from: 0; to: 1; value: s.muted ? 0 : s.volume; onMoved: backend.setVolume(value) }
                         Text { text: s.muted ? "0%" : Math.round(s.volume * 100) + "%"; color: Theme.muted; font.pixelSize: 11; Layout.preferredWidth: 32 }
                     }

@@ -6,7 +6,7 @@ import argparse
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / 'dist/VocalPitchLab-1.1.1-windows-x64'
+OUT = ROOT / 'dist/VocalPitchLab-1.1.2-windows-x64'
 
 
 def main():
@@ -34,10 +34,12 @@ def main():
             digest = hashlib.file_digest(source, 'sha256').hexdigest()
         rows.append(dict(name=path.name, bytes=size, sha256=digest))
     names = '\n'.join(f"- {path.name}" for path in [setup, *volumes])
+    update_instructions = ''.join(
+        f'从 {update.stem.rsplit("-from-", 1)[-1]} 更新：下载 {update.name} 和全部同名配套 .bin 分卷（如有），关闭软件后运行。\n'
+        for update in updates)
     (OUT / '安装说明.txt').write_text(
         f'VocalPitchLab {version} · Windows x64 离线安装包\n\n' +
-        ('从 1.1.0 更新：只需下载 update-from-1.1.0.exe，关闭软件后运行。\n'
-         '文件缺失或版本不支持时，使用完整安装包。\n\n' if updates else '') +
+        (update_instructions + '文件缺失或版本不支持时，使用完整安装包。\n\n' if updates else '') +
         '首次安装或修复：\n'
         '1. 下载下列完整安装文件，放在同一文件夹；不要改名。\n'
         '2. 双击其中的 Setup 可执行文件，按向导安装。\n'

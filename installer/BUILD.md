@@ -12,6 +12,18 @@
 
 构建脚本使用项目下的 `work/`、`build/` 和 `dist/` 目录。依赖缓存、模型及构建工具需另行准备；源码仓库不包含这些大型文件。模型来源与使用条件见 [第三方说明](../THIRD_PARTY_NOTICES.md) 和 [模型许可记录](../MODEL_LICENSE_REVIEW.md)。
 
+GPU 运行环境固定为 PyTorch 2.7.1、torchaudio 2.7.1 的 CUDA 12.8 构建，配套版本记录在 `resources/reproducible/runtime.lock`。这组构建包含 RTX 50 系列需要的 `sm_120` 内核。`prepare_delivery.py` 会拒绝与锁定版本不一致的 GPU 依赖；更换运行库后需要重新组装完整包，或明确使用包含运行库的更新模式。
+
+使用新缓存目录时，向 `lock_artifacts.py --artifacts <缓存目录>` 和 `rebuild_environment.py --artifacts <缓存目录>` 传入同一目录。缓存内每个包只保留一个目标版本；`wheels/` 与 `vendor-wheels/` 分别对应两个锁定清单。
+
+组装后，用候选目录自带的 Python 检查版本、GPU 实际运算、音频算子以及 `sm_120` 内核：
+
+```powershell
+<候选目录>/runtime/python.exe -I -B tests/package_gpu_check.py <候选目录> --output <测试结果目录>/gpu.json
+```
+
+这项检查通过不等于在 RTX 50 系列实机上通过。结果中的 `blackwell_hardware_tested` 记录是否使用计算能力 12.x 的显卡；仍需执行完整模型分析与播放检查。
+
 GitHub 发布附件包括安装程序、分卷、更新包、源码包和安装说明。
 
 常规安装包构建使用 Ultra64 分组固实压缩：
@@ -58,8 +70,14 @@ python installer/package_benchmark.py --stage build/delivery-candidate --output 
 python installer/build_update.py --baseline <正式版应用目录> --stage <新版本应用目录> --from-version 1.1.0 --version 1.1.1 --output work/update-1.1.1 --removals <组装报告目录>/optional-trim.json
 ```
 
-基线必须来自已发布且校验通过的完整安装包。构建器逐文件比较 SHA-256，更新包只携带程序和资源的变化。运行环境或模型需要替换时拒绝生成此类更新包，改用完整安装包。
+基线必须来自已发布且校验通过的完整安装包。构建器逐文件比较 SHA-256，默认只携带程序和资源的变化。需要替换 Python 运行环境内的依赖时，显式传入 `--include-runtime`；该模式使用分卷，保留原有模型，并为替换及移除的文件预留备份空间。模型、第三方分离代码或 FFmpeg 需要替换时仍使用完整安装包。
 
-更新器验证旧启动器版本和所有复用文件；只接受对应基线或目标版本的文件。程序运行时不更新，目录链接和不完整环境会被拒绝。替换文件前备份，写入后验证；失败或再次运行时恢复备份。已确认无用的文件仅在校验值匹配时删除。重复运行更新包可用，用户数据目录不参与更新。
+包含运行库的更新示例：
+
+```powershell
+python installer/build_update.py --baseline <1.1.1 正式安装目录> --stage <1.1.2 应用目录> --from-version 1.1.1 --version 1.1.2 --include-runtime --output <新的更新包目录>
+```
+
+更新器验证旧启动器版本和所有复用文件；只接受对应基线或目标版本的文件。程序运行时不更新，目录链接和不完整环境会被拒绝。替换或移除文件前备份，提交前核对完整目标清单；失败或再次运行时恢复备份。旧依赖元数据与其他待移除文件同样参与恢复。重复运行更新包可用，用户数据目录不参与更新。
 
 完整包和更新包使用相同安装身份，卸载记录合并。测试使用 `/PACKAGEVALIDATION=1` 和隔离目录；该参数不绕过版本、校验及恢复检查。

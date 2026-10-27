@@ -1,23 +1,23 @@
 # 安装与常见问题
 
-本文对应 VocalPitchLab 1.1.1 Windows x64 离线安装版本。安装完成后，通过开始菜单或桌面的 VocalPitchLab 启动，也可打开安装目录中的 VocalPitchLab.exe。
+本文对应 VocalPitchLab 1.1.2 Windows x64 离线安装版本。安装完成后，通过开始菜单或桌面的 VocalPitchLab 启动，也可打开安装目录中的 VocalPitchLab.exe。
 
 ## 安装
 
-1. 从 [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest) 或 [夸克网盘](https://pan.quark.cn/s/fec1530accea) 下载同一版本的 `setup.exe` 和全部配套 `.bin` 分卷，放在同一文件夹，保持原文件名。
-2. 双击 `setup.exe`，按向导完成安装。无需单独解压分卷，无需配置 Python 或 CUDA Toolkit。
+1. 从 [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest) 或 [夸克网盘](https://pan.quark.cn/s/fec1530accea) 选择一种完整安装方式：单文件版下载 `VocalPitchLab-1.1.2-windows-x64-offline-setup.exe`；分卷版下载 `VocalPitchLab-1.1.2-windows-x64-setup.exe` 和全部配套 `.bin` 分卷。
+2. 分卷版需将同一版本的全部文件放在同一文件夹，保持原文件名。运行对应的 `.exe`，按向导完成安装。无需单独解压分卷，无需配置 Python 或 CUDA Toolkit。
 3. 如果系统缺少必要的微软运行组件，安装程序会离线补装。此时 Windows 可能请求管理员权限；已有足够新版本时会跳过。
 4. 如果提示需要重启，先保存其他工作，再重启 Windows 并重新运行安装程序。
 
-兼容的 NVIDIA 显卡和驱动可以加速分析；没有可用的 GPU 加速时会使用 CPU，分析明显较慢。暂未公布经过实测的最低配置。
+兼容的 NVIDIA 显卡和驱动可以加速分析；本版 GPU 运行库要求 Windows NVIDIA 驱动 570.65 或更新版本，且驱动须支持具体显卡型号。没有可用的 GPU 加速时会使用 CPU，分析明显较慢。
 
 ## 更新
 
-已安装 1.1.0 的用户可以下载 `VocalPitchLab-1.1.1-windows-x64-update-from-1.1.0.exe`，关闭软件后运行。更新包复用现有运行环境和模型，不需要下载完整分卷。安装在其他目录时，在向导中选择原安装目录。
+已安装 1.1.1 的用户使用上面的任一种完整安装包覆盖更新，无须先卸载。关闭 VocalPitchLab 后运行安装程序；使用同一个 Windows 用户账户且旧安装记录有效时，向导会自动沿用原安装目录。目录被手动移动或未被识别时，手动选择原安装目录。
 
-更新程序会检查安装文件。文件缺失、被修改或版本不支持时，使用完整安装包覆盖更新，无须先卸载。完整包也适用于首次安装和修复。
+完整包会替换程序和运行库，并保留歌曲库、设置与分析结果，也适用于首次安装和修复缺失或被修改的安装文件。
 
-更新中断后，可重新运行同一个更新包恢复并继续；无法恢复时使用完整安装包。建议提前备份 `%LOCALAPPDATA%/VocalPitchLab` 中的歌曲库与分析数据。
+建议提前备份 `%LOCALAPPDATA%/VocalPitchLab` 中的歌曲库与分析数据。安装中断后，重新运行完整安装包完成安装或修复。
 
 源码包供开发使用，普通安装无需下载。
 
