@@ -6,6 +6,8 @@ import numpy as np
 import soundfile as sf
 from vocalpitchlab.analysis.analysis_cache import stage, digest_file, atomic_json
 
+SEPARATION_MODES = ('original', 'mel_roformer', 'bs_only', 'mel_bs', 'htdemucs')
+
 
 def analyze(source, separation='mel_bs', progress=None):
     from vocalpitchlab.analysis.pipeline_timing import Timeline
@@ -14,14 +16,19 @@ def analyze(source, separation='mel_bs', progress=None):
     from vocalpitchlab.audio.vocal_separator import separate, VERSION as separation_version
     from vocalpitchlab.runtime.resource_policy import device as select_device, clear, overlap_game, hardware
     import torch
+    if separation not in SEPARATION_MODES:
+        raise ValueError('Invalid separation')
     progress = progress or (lambda value, message: None)
     source = Path(source).resolve()
     hardware(replay=True)
     device = select_device()
     if device=='cuda':torch.cuda.reset_peak_memory_stats()
     resource = dict(device=device, torch=torch.__version__, memory_limit=os.environ.get('VPL_CUDA_MEMORY_GIB', '0'))
-    from vocalpitchlab.audio.separation_execution import select as separation_policy
-    resource['separation_execution']=separation_policy(device)
+    if separation == 'original':
+        torch.set_num_threads(4)
+    else:
+        from vocalpitchlab.audio.separation_execution import select as separation_policy
+        resource['separation_execution']=separation_policy(device)
     metrics = {}
 
     def cached(name, signature, build):
@@ -46,7 +53,6 @@ def analyze(source, separation='mel_bs', progress=None):
         return dict(audio=path)
     original = cached('decode', dict(source=source_hash, version='ffmpeg-float32-stereo-44100-v1'), decoded)['audio']
     duration = sf.info(original).duration
-    progress(15, '提取人声')
     def separated(input_path, folder, lead=False):
         audio, sr = sf.read(input_path, dtype='float32', always_2d=True)
         vocals = demucs(audio, sr, device) if separation == 'htdemucs' else separate(audio, sr, device, folder, lead=lead)
@@ -54,16 +60,22 @@ def analyze(source, separation='mel_bs', progress=None):
             raise ValueError('Invalid separated audio')
         path = folder/'vocals.wav'; sf.write(path, vocals, sr, subtype='FLOAT')
         return dict(audio=path)
-    full_version = 'htdemucs-v1' if separation == 'htdemucs' else separation_version
-    full = cached('vocals', dict(input=metrics['decode']['content']['audio'], version=full_version, resource=resource),
-                  lambda folder: separated(original, folder))['audio']
-    vocals = full
-    vocal_key = metrics['vocals']['content']['audio']
+    vocals = original
+    vocal_key = metrics['decode']['content']['audio']
+    full_version = None
+    if separation in ('mel_roformer', 'mel_bs', 'htdemucs'):
+        progress(15, '提取人声')
+        full_version = 'htdemucs-v1' if separation == 'htdemucs' else separation_version
+        vocals = cached('vocals', dict(input=vocal_key, version=full_version, resource=resource),
+                        lambda folder: separated(original, folder))['audio']
+        vocal_key = metrics['vocals']['content']['audio']
     lead_version = 'bs-frazer-becruily-eb90ee24-overlap4-v1'
-    if separation == 'mel_bs':
+    harmony = separation in ('mel_bs', 'bs_only')
+    if harmony:
         progress(35, '分离和声')
+        harmony_input = vocals
         vocals = cached('lead', dict(input=vocal_key, version=lead_version, resource=resource),
-                        lambda folder: separated(full, folder, lead=True))['audio']
+                        lambda folder: separated(harmony_input, folder, lead=True))['audio']
         vocal_key = metrics['lead']['content']['audio']
     clear()
     from concurrent.futures import ThreadPoolExecutor
@@ -113,8 +125,10 @@ def analyze(source, separation='mel_bs', progress=None):
                 curves=dict(crepe_full=str(full_curve), rmvpe_vocals=str(curves['raw']), rmvpe_tracked=str(curves['tracked'])),
                 created=time.strftime('%Y-%m-%d %H:%M:%S'), review_windows=[],
                 algorithm=dict(pipeline='lead-default-v2', display_pitch='rmvpe_tracked', separation=separation,
-                               separation_version=full_version, harmony_separation=separation=='mel_bs'))
-    if separation == 'mel_bs':song['algorithm']['lead_separation_version'] = lead_version
+                               separation_version=full_version, harmony_separation=harmony))
+    if separation == 'mel_bs':
+        song['full_vocals'] = str(harmony_input)
+    if harmony:song['algorithm']['lead_separation_version'] = lead_version
     progress(90, '识别音符边界')
     try:
         song['game_notes'] = str(game_future.result() if game_future else run_game())

@@ -1,5 +1,7 @@
 # VocalPitchLab 1.1.1
 
+[English](RELEASE_NOTES_1.1.1.en.md)
+
 ## 安装与更新
 
 - 完整离线安装包体积减少约 27%。

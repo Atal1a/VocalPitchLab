@@ -12,7 +12,7 @@ from privacy_check import ignore_private_files, inspect
 from gpu_runtime import validate_gpu_dependencies
 
 ROOT = Path(__file__).resolve().parents[1]
-STAGE = ROOT / 'build/delivery-1.1.2-final'
+STAGE = ROOT / 'build/delivery-1.2.0'
 CLEAN = ROOT / 'work/repro-build/app'
 BASE = ROOT / 'build/slim-preview/runtime'
 
@@ -26,7 +26,7 @@ def copy(src, dst):
 def main():
     global STAGE, CLEAN, BASE
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--version', default='1.1.2')
+    parser.add_argument('--version', default='1.2.0')
     parser.add_argument('--stage', type=Path, default=STAGE)
     parser.add_argument('--dependencies', type=Path, default=CLEAN)
     parser.add_argument('--base-runtime', type=Path, default=BASE)
@@ -51,7 +51,9 @@ def main():
     reports.mkdir(parents=True, exist_ok=True)
     STAGE.mkdir(parents=True)
     for name in SOURCE_FILES: copy(ROOT/name, STAGE/name)
-    for name in [*RESOURCES, 'INSTALLATION.md', 'CHANGELOG.md']: copy(ROOT/name, STAGE/name)
+    for name in [*RESOURCES, 'INSTALLATION.md', 'INSTALLATION.en.md',
+                 'CHANGELOG.md', 'CHANGELOG.en.md']:
+        copy(ROOT/name, STAGE/name)
     copy(ROOT/'installer/launch.py', STAGE/'launch.py')
     for name in [*VENDOR, 'separation-runtime']: copy(CLEAN/'vendor'/name, STAGE/'vendor'/name)
     copy(CLEAN/'models', STAGE/'models')

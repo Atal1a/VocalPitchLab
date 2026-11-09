@@ -1,5 +1,7 @@
 # VocalPitchLab 1.1.2
 
+[English](RELEASE_NOTES_1.1.2.en.md)
+
 ## 更新内容
 
 - 更新 GPU 运行库，支持 RTX 50 系列，改进 GPU 自检提示。
@@ -10,7 +12,7 @@
 
 ## 安装与升级
 
-首次安装和升级均使用完整包。[GitHub 分卷版](https://github.com/Atal1a/VocalPitchLab/releases/latest)需将安装程序与全部 `.bin` 分卷放在同一文件夹；[夸克单文件版](https://pan.quark.cn/s/fec1530accea)直接运行安装程序。
+首次安装和升级均使用完整包。[GitHub 分卷版](https://github.com/Atal1a/VocalPitchLab/releases/tag/v1.1.2)需将安装程序与全部 `.bin` 分卷放在同一文件夹；[夸克单文件版](https://pan.quark.cn/s/fec1530accea)直接运行安装程序。
 
 已有用户关闭软件后，覆盖安装到原目录，无须先卸载。歌曲库、设置和分析结果会保留，建议提前备份 `%LOCALAPPDATA%\VocalPitchLab`。
 

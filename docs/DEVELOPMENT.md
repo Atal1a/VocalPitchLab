@@ -1,5 +1,7 @@
 # 开发
 
+[English](DEVELOPMENT.en.md)
+
 使用 Python 3.12 和 `requirements.txt` 中的依赖，在项目根目录运行：
 
 ```powershell
@@ -22,3 +24,5 @@ python main.py
 `VPL_DATA_DIR` 和 `VPL_MODEL_DIR` 可指定数据与模型目录。资源路径以项目或安装目录为基准，不依赖当前工作目录。
 
 后台分析入口：`python main.py --analyze <音频路径>`。批量任务使用 `--analysis-worker`，通过标准输入接收逐行 JSON。
+
+播放图表的对照、CPU 限制、WARP 和固定内存虚拟机配置见[播放性能测试](PERFORMANCE.md)。

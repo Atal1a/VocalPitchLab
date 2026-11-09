@@ -21,7 +21,7 @@ class PitchHoverTests(unittest.TestCase):
         self.view.setHeight(360)
         self.backend = SimpleNamespace(
             song={'duration': 20}, span=10, low=60, high=84, t=0,
-            state={'dark': True}, settings={'hoverNotes': True, 'liveNotes': False, 'liveCurve': False},
+            dark=True, playback={'mainNote': '—', 'pitch': '—'}, settings={'hoverNotes': True, 'liveNotes': False, 'liveCurve': False},
             show_blocks=True, show_curve=False, preview_note=None, preview_until=0,
             loop=False, notes=[], x_range=lambda: (0, 10),
             primary='test', series={'test': (np.array([0., 60.]), np.array([69., 69.]))},

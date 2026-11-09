@@ -23,7 +23,7 @@ Rectangle {
     Text { anchors.right: parent.right; anchors.rightMargin: 5; anchors.verticalCenter: parent.verticalCenter; text: "›"; color: Theme.muted; font.pixelSize: 14; opacity: interaction.containsMouse ? .7 : 0; Behavior on opacity { NumberAnimation { duration: 140 } } }
     ToolTip.visible: interaction.containsMouse && !interaction.pressed
     ToolTip.delay: 800
-    ToolTip.text: "滚轮微调 · 左右拖动调整 · Shift 拖动精调"
+    ToolTip.text: qsTr("滚轮微调 · 左右拖动调整 · Shift 拖动精调")
     MouseArea {
         id: interaction
         anchors.fill: parent

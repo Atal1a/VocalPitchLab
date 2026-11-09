@@ -1,10 +1,12 @@
 # 安装与常见问题
 
-适用于 VocalPitchLab 1.1.2 Windows x64 完整离线安装包。
+[English](INSTALLATION.en.md)
+
+适用于 VocalPitchLab 1.2.0 Windows x64 完整离线安装包。
 
 ## 安装
 
-1. 选择一种完整安装方式：[GitHub 分卷版](https://github.com/Atal1a/VocalPitchLab/releases/latest)下载 `VocalPitchLab-1.1.2-windows-x64-setup.exe` 和全部同名 `.bin` 分卷；[夸克单文件版](https://pan.quark.cn/s/fec1530accea)下载 `VocalPitchLab-1.1.2-windows-x64-offline-setup.exe`。
+1. 分卷版使用 `VocalPitchLab-1.2.0-windows-x64-setup.exe` 和全部配套 `.bin` 分卷。单文件版使用 `VocalPitchLab-1.2.0-windows-x64-offline-setup.exe`。
 2. 分卷版需将同一版本的全部文件放在同一文件夹，保持原文件名。运行对应的 `.exe`，按向导完成安装。无需单独解压分卷，无需配置 Python 或 CUDA Toolkit。
 3. 如果系统缺少必要的微软运行组件，安装程序会离线补装。此时 Windows 可能请求管理员权限；已有足够新版本时会跳过。
 4. 运行组件需要重启时，向导会在安装完成后提示，可选择立即重启或稍后重启。重启后再启动 VocalPitchLab，无须重新运行安装程序。
@@ -14,6 +16,8 @@
 兼容的 NVIDIA 显卡和驱动可以加速分析；本版 GPU 运行库要求 Windows NVIDIA 驱动 570.65 或更新版本，且驱动须支持具体显卡型号。没有可用的 GPU 加速时会使用 CPU，分析明显较慢。
 
 ## 更新
+
+已安装正式版 1.1.2 时，可关闭 VocalPitchLab 后运行 `VocalPitchLab-1.2.0-windows-x64-update-from-1.1.2.exe`。更新包会复用现有运行库和模型。若安装记录未被识别，可手动选择原安装目录。其他版本或原安装文件缺失、被修改时，使用完整安装包。
 
 已有用户使用上面的任一种完整安装包覆盖更新，无须先卸载。关闭 VocalPitchLab 后运行安装程序；使用同一个 Windows 用户账户且旧安装记录有效时，向导会自动沿用原安装目录。目录被手动移动或未被识别时，手动选择原安装目录。
 
@@ -31,7 +35,7 @@
 
 **原唱或人声无声**：在设置中开启“兼容播放”，完全退出软件后重新启动，再播放已有分析结果，无须重新分析。
 
-**分析慢或转用 CPU**：关闭占用显存较多的程序，检查 NVIDIA 驱动是否适合自己的显卡。无需安装完整 CUDA 开发工具包。
+**分析慢或转用 CPU**。在「设置 → 音频分离」关闭人声和和声分离后，新导入的歌曲会直接用原曲分析，伴奏可能被识别为人声音高。使用 NVIDIA 显卡时，可检查驱动版本是否支持显卡。
 
 **分离后缺少歌声**：在当前歌曲的播放区将“和声分离”切换为“关”。已有结果会直接复用，首次切换可能需要分析。部分合唱、高音叠唱可能被和声分离模型削弱。
 

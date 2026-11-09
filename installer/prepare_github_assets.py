@@ -6,7 +6,7 @@ import argparse
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / 'dist/VocalPitchLab-1.1.2-windows-x64'
+OUT = ROOT / 'dist/VocalPitchLab-1.2.0-windows-x64'
 
 
 def main():

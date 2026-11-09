@@ -1,5 +1,7 @@
 # Windows 构建
 
+[English](BUILD.en.md)
+
 需要 Windows x64、Python 3.12、Inno Setup 和 .NET Framework 编译器。
 
 - `resources/reproducible/` 保存依赖清单、下载地址、校验值与补丁。

@@ -1,3 +1,5 @@
+[English](README.en.md)
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/hero-dark.svg">
   <img src="docs/images/hero-light.svg" alt="VocalPitchLab — 开源人声音高分析工具" width="1200">
@@ -8,15 +10,13 @@
 </p>
 
 <p align="center">
-  <a href="RELEASE_NOTES_1.1.2.md"><img src="docs/images/badge-version.svg" alt="版本 1.1.2" height="28"></a>
+  <a href="RELEASE_NOTES_1.2.0.md"><img src="docs/images/badge-version.svg" alt="版本 1.2.0" height="28"></a>
   <a href="INSTALLATION.md"><img src="docs/images/badge-platform.svg" alt="Windows x64" height="28"></a>
   <a href="LICENSE"><img src="docs/images/badge-license.svg" alt="GPL-3.0-only" height="28"></a>
 </p>
 
 <p align="center">
   <a href="https://github.com/Atal1a/VocalPitchLab/releases/latest"><strong>GitHub 下载</strong></a>
-  &nbsp; · &nbsp;
-  <a href="https://pan.quark.cn/s/fec1530accea"><strong>夸克网盘下载</strong></a>
   &nbsp; · &nbsp;
   <a href="INSTALLATION.md">安装说明</a>
   &nbsp; · &nbsp;
@@ -39,7 +39,7 @@
 
 ## 钢琴试听
 
-点击曲线左侧的音名，试听对应的标准钢琴音。可以暂停后逐音比对，也可以循环播放一段乐句，反复听辨音高。
+点击曲线左侧的音名，试听对应的标准钢琴音。按住音名可延音，松手释放。可以暂停后逐音比对，也可以循环播放一段乐句，反复听辨音高。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/piano-demo-dark.gif">
@@ -50,14 +50,14 @@
 
 | 功能 | 可以做什么 |
 | :--- | :--- |
-| **人声与原曲** | 切换原曲和分离人声；按歌曲开启或关闭和声分离；支持兼容播放模式。 |
+| **音频分离** | 独立设置人声分离和和声分离，切换原曲与分离人声，或将分离后的音轨导出为 WAV。 |
 | **播放与视图** | 循环播放、调整音量，缩放时间与音域，或使用自适应视图。 |
 | **歌曲库** | 导入与批量管理歌曲，保存分析结果和查看位置。 |
-| **界面主题** | 支持浅色与深色主题。 |
+| **界面** | 支持简体中文、英文、浅色和深色主题，可开启「降低运行负载」。 |
 
 ## 开始使用
 
-1. 从 [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest) 下载同一版本的安装程序和**全部 `.bin` 分卷**，放在同一文件夹，保持原文件名；或从 [夸克网盘](https://pan.quark.cn/s/fec1530accea) 下载单文件完整安装包。
+1. 从 [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest) 下载同一版本的安装程序和**全部 `.bin` 分卷**，放在同一文件夹，保持原文件名。
 2. 运行安装程序完成安装，无需配置 Python 或 CUDA Toolkit。已有用户先关闭软件，再覆盖安装到原目录，无须先卸载。
 3. 打开 VocalPitchLab，点击「导入歌曲」，等待分析完成后播放、查看和比对。
 

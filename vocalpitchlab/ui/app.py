@@ -1,17 +1,20 @@
 """Qt Quick frontend bridge. Analysis stays in the existing Python worker."""
-import csv,json,sys,uuid,subprocess,math,os,time
+import csv,json,sys,uuid,subprocess,math,os,time,re
+from collections import OrderedDict
 from vocalpitchlab.runtime.paths import APP_ROOT, DATA_ROOT, prepare, worker_python
 from vocalpitchlab.runtime.playback import configure_backend
 configure_backend(DATA_ROOT)
+from vocalpitchlab.ui.localization import LANGUAGES, LocalizedEngine, compute_status, localized
 from vocalpitchlab.ui.plot_support import PresentationClock, lod_stride, stable_envelope, vocal_loudness, melody_outline, vocal_gain
+from vocalpitchlab.ui.plot_layers import PlotLayers
 # Python paint callbacks must share the GUI thread; a threaded scene graph can
 # deadlock synchronous window grabs while the GUI thread holds Python's GIL.
 os.environ.setdefault('QSG_RENDER_LOOP','basic')
 from pathlib import Path
 import numpy as np
-from PySide6.QtCore import QObject,Signal,Slot,Property,Qt,QEvent,QUrl,QTimer,QProcess,QProcessEnvironment,QLockFile,QRectF,QElapsedTimer
+from PySide6.QtCore import QObject,Signal,Slot,Property,Qt,QEvent,QUrl,QTimer,QProcess,QProcessEnvironment,QLockFile,QRectF,QElapsedTimer,QStandardPaths,QThread
 from PySide6.QtGui import QGuiApplication,QColor,QPen,QPainterPath,QFont,QFontDatabase,QImage,QPainter,QLinearGradient,QIcon
-from PySide6.QtQml import QQmlApplicationEngine,qmlRegisterType
+from PySide6.QtQml import qmlRegisterType
 from PySide6.QtQuick import QQuickPaintedItem
 from PySide6.QtMultimedia import QMediaPlayer,QAudioOutput
 
@@ -30,31 +33,69 @@ def write_json(path,value):
     temp=path.with_suffix('.tmp');temp.write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf-8');temp.replace(path)
 def local_path(value):return Path(QUrl(value).toLocalFile()) if str(value).startswith('file:') else Path(value)
 
+
+class StemExport(QThread):
+    def __init__(self, destination, sources, protected, parent):
+        super().__init__(parent)
+        self.destination = destination
+        self.sources = sources
+        self.protected = protected
+        self.message = '音轨已导出。'
+
+    def run(self):
+        from vocalpitchlab.audio.stem_export import export_wav
+        try:
+            if self.destination.suffix.lower() != '.wav':
+                self.message = '请使用 .wav 文件扩展名。'
+                return
+            target = self.destination.resolve()
+            cache = (DATA_ROOT / 'results' / 'stages').resolve()
+            aliases = {target, self.destination.absolute()}
+            if target.is_relative_to(cache) or (self.destination.exists() and any(
+                Path(path).absolute() in aliases for path in self.protected
+            )):
+                self.message = '请选择其他文件名，以保留原音频和分离结果。'
+                return
+            export_wav(self.destination, self.sources, self.isInterruptionRequested)
+        except (OSError, ValueError, RuntimeError):
+            self.message = '无法导出音轨，请检查音频和保存位置。'
+
+
 class Controller(QObject):
-    changed=Signal();contentChanged=Signal();libraryChanged=Signal()
+    changed=Signal();frameChanged=Signal();contentChanged=Signal();libraryChanged=Signal()
+    languageChanged=Signal(str);localizedContentChanged=Signal()
     def __init__(self,folder=None,bootstrap=True,worker=None):
-        super().__init__();self.folder=Path(folder or DATA_ROOT/'library');self.folder.mkdir(parents=True,exist_ok=True);self.path=self.folder/'index.json'
+        super().__init__();self.changed.connect(self.frameChanged.emit);self.folder=Path(folder or DATA_ROOT/'library');self.folder.mkdir(parents=True,exist_ok=True);self.path=self.folder/'index.json'
         if self.path.exists():self.data=json.loads(self.path.read_text(encoding='utf-8'))
         else:
             choices=sorted((DATA_ROOT/'results').glob('rmvpe-*/index.json')) if bootstrap else []
             self.data=json.loads(choices[-1].read_text(encoding='utf-8')) if choices else {'songs':[]}
         self.data.setdefault('jobs',[])
-        self.settings=dict(theme='system',hoverNotes=True,liveNotes=True,liveCurve=True,blocks=True,curve=True,volume=.65,pianoVolume=.65,pitchModel='tracked',noteMode='game',separationModel='mel_bs',compatiblePlayback=False)
+        self.settings=dict(theme='system',hoverNotes=True,liveNotes=True,liveCurve=True,blocks=True,curve=True,volume=.65,pianoVolume=.65,pitchModel='tracked',noteMode='game',vocalSeparation=True,separationModel='mel_bs',compatiblePlayback=False,reduceLoad=False)
         self.settings.update(self.data.get('settings',{}));self.trash=[]
+        if self.settings.get('language') not in LANGUAGES:
+            self.settings['language'] = LANGUAGES[0]
+        self.contentChanged.connect(self.localizedContentChanged.emit)
         self.settings.update(pitchModel='tracked',noteMode='game')
         if self.settings.get('pipelineVersion')!='lead-default-v1':
             self.settings.update(separationModel='mel_bs',pipelineVersion='lead-default-v1')
         self.settings.pop('motion',None)
         from vocalpitchlab.audio.vocal_separator import available
         self.high_quality_available=available()
+        self.harmony_available=available(lead=True)
         for song in self.data['songs']:song.setdefault('song_id',uuid.uuid4().hex)
         for job in self.data['jobs']:
             if job['state'] in ['running','queued']:job.update(state='interrupted',message='上次分析已中断，可重试')
         self.presentation_process=None;self.presentation_queue=[];self.presentation_active=None;self.closing=False
-        self.process=None;self.active=None;self.display_job=None;self.buffer='';self.worker=Path(worker or ROOT/'main.py');self.reusable_worker=self.worker.resolve()==(ROOT/'main.py').resolve();self.worker_closing=False
+        self.stem_export = None
+        self.stem_options = (None, {})
+        self.stem_export_request = None
+        self.process=None;self.active=None;self.display_job=None;self.buffer=b'';self.worker=Path(worker or ROOT/'main.py');self.reusable_worker=self.worker.resolve()==(ROOT/'main.py').resolve();self.worker_closing=False
         self.settings.setdefault('cleanCurve',True)
         self.curve_reliability={}
         self.song=None;self.selected=-1;self.series={};self.loudness=(np.array([0.]),np.array([.5]));self.notes=[];self.compare=set();self.message='选择或拖入歌曲，开始分析。'
+        self.message_values = {}
+        self.feedback_id = 0
         self.t=0.;self.span=20.;self.low=48.;self.high=72.;self.auto=False;self.show_curve=True;self.show_blocks=True
         self.source='vocals';self.window_index=0;self.loop=False;self.pending=None;self.resume=False;self.changing=False;self.revision=0;self.buffer_seek=None
         self.loop_a=0.;self.loop_b=10.;self.loop_initialized=False;self.muted=False
@@ -64,10 +105,12 @@ class Controller(QObject):
         self.vocal_player=QMediaPlayer(self);self.vocal_output=QAudioOutput(self);self.vocal_player.setAudioOutput(self.vocal_output);self.vocal_output.setMuted(True)
         self.vocal_pending=False;self.vocal_player.mediaStatusChanged.connect(self.vocal_ready)
         self.audio_song=None;self.vocal_boost=1.;self.piano=None;self.preview_note=None;self.preview_until=0.;self.readout_time=-1.;self.readout_pitch='—';self.drag_view=None
+        self.piano_held = False
         self.player.positionChanged.connect(self.position);self.player.mediaStatusChanged.connect(self.media)
         self.player.playbackStateChanged.connect(self.playback_changed)
         self.player.errorOccurred.connect(lambda *args:self.feedback('音频无法播放，请检查结果文件是否仍在原位置。'))
-        self.timer=QTimer(self);self.timer.setTimerType(Qt.TimerType.PreciseTimer);self.timer.setInterval(8);self.timer.timeout.connect(self.tick);self.timer.start()
+        self.presentation_visible=True
+        self.timer=QTimer(self);self.timer.setTimerType(Qt.TimerType.PreciseTimer);self.timer.setInterval(16);self.timer.timeout.connect(self.tick)
         self.memory_timer=QTimer(self);self.memory_timer.setInterval(3000);self.memory_timer.timeout.connect(self.persist_view);self.memory_timer.start()
         QGuiApplication.styleHints().colorSchemeChanged.connect(lambda _:self.changed.emit())
         if self.data['songs']:self.selectSong(min(self.data.get('last_song',0),len(self.data['songs'])-1))
@@ -85,23 +128,47 @@ class Controller(QObject):
         if self.song:
             before=self.song.get('view');self.remember_view()
             if before!=self.song['view']:self.save()
-    def feedback(self,text):self.message=text;self.changed.emit()
+    def text(self,source):return localized(self.settings['language'],source)
+    def feedback(self, text, **values):
+        self.message = text
+        self.message_values = values
+        self.feedback_id += 1
+        self.changed.emit()
+    @property
+    def default_separation(self):
+        mode = self.settings['separationModel']
+        if self.settings['vocalSeparation']:
+            return mode
+        return 'bs_only' if mode == 'mel_bs' else 'original'
+
+    @property
+    def active_separation(self):
+        return self.song.get('algorithm', {}).get('separation', 'htdemucs') if self.song else ''
+
+    def queued_job(self):
+        return next((job for job in self.data['jobs'] if job['state'] == 'queued'), None)
+
+    def presented_job(self):
+        return self.active or self.queued_job() or self.display_job
+
     @Property('QVariantList',notify=libraryChanged)
     def songs(self):return [dict(index=i,name=s['name'].replace('+-+',' · '),duration=clock(s['duration'])) for i,s in enumerate(self.data['songs'])]
-    @Property('QVariantList',notify=contentChanged)
-    def jobs(self):return [dict(id=j['id'],name=Path(j['source']).stem,state=j['state'],message=j.get('message','')) for j in self.data['jobs'] if j['state'] not in ['complete','retried']]
+    @Property('QVariantList',notify=localizedContentChanged)
+    def jobs(self):return [dict(id=j['id'],name=Path(j['source']).stem,state=j['state'],message=self.text(j.get('message',''))) for j in self.data['jobs'] if j['state'] not in ['complete','retried']]
     @Property('QVariantList',notify=contentChanged)
     def noteRows(self):return self.notes
     @Property('QVariantList',notify=contentChanged)
     def windows(self):return [dict(label=w['label']+'  '+clock(w['start']),start=w['start'],end=w['end']) for w in self.song.get('review_windows',[])] if self.song else []
-    @Property('QVariantList',notify=contentChanged)
-    def models(self):return [dict(key=k,label=LABELS[k],color=COLORS[k]) for k in self.series]
+    @Property('QVariantList',notify=localizedContentChanged)
+    def models(self):return [dict(key=k,label=self.text(LABELS[k]),color=COLORS[k]) for k in self.series]
     @Property(str,constant=True)
     def inputUrl(self):return QUrl.fromLocalFile(str(DATA_ROOT/'input')).toString()
-    @Property('QVariantMap',notify=changed)
-    def state(self):
+    @Property(bool,notify=changed)
+    def dark(self):
+        return self.settings['theme']=='dark' or (self.settings['theme']=='system' and QGuiApplication.styleHints().colorScheme()==Qt.ColorScheme.Dark)
+    @Property('QVariantMap',notify=frameChanged)
+    def playback(self):
         active=next((n for n in self.notes if n['start']<=self.t<n['end']),None)
-        job=self.active or self.display_job
         pitch='—'
         if self.series and (abs(self.t-self.readout_time)>=.12 or not self.state_playing()):
             times,values=self.series[self.primary];i=int(np.clip(np.searchsorted(times,self.t,side='right')-1,0,len(values)-1));v=values[i]
@@ -109,25 +176,42 @@ class Controller(QObject):
                 tail=values[max(0,i-7):i+1];tail=tail[np.isfinite(tail)]
                 # Do not smooth over a real semitone transition or fill a gap.
                 nearby=tail[abs(tail-v)<.5];v=float(np.median(nearby)) if len(nearby) else v
-                pitch=note(v)+f' {round((v-round(v))*100/5)*5:+d} 音分'
+                cents = round((v-round(v))*100/5)*5
+                pitch = note(v) + ' ' + self.text('{cents:+d} 音分').format(cents=cents)
             self.readout_pitch=pitch;self.readout_time=self.t
         elif self.series:pitch=self.readout_pitch
-        return dict(loaded=bool(self.song),selected=self.selected,title=self.song['name'].replace('+-+',' · ') if self.song else '你的歌声工作台',
+        return dict(position=self.t,time=clock(self.t),pitch=pitch,mainNote=active['note'] if active else '—')
+    @Property('QVariantMap',notify=changed)
+    def state(self):
+        job=self.presented_job()
+        playback=self.playback
+        job_message = self.text(job.get('message','')) if job else ''
+        job_text = ''
+        if job:
+            job_text = ' · '.join(filter(None, (job_message,
+                compute_status(self.settings['language'], job.get('computeStatus','')))))
+        message = self.text(self.message)
+        if self.message_values:
+            message = message.format(**self.message_values)
+        return dict(loaded=bool(self.song),selected=self.selected,title=self.song['name'].replace('+-+',' · ') if self.song else self.text('你的歌声工作台'),
           duration=self.song['duration'] if self.song else 0,position=self.t,time=clock(self.t),total=clock(self.song['duration']) if self.song else '00:00',
           playing=self.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState,autoRange=self.auto,span=self.span,low=self.low,high=self.high,
-          blocks=self.show_blocks,curve=self.show_curve,source=self.source,loop=self.loop,windowIndex=self.window_index,count=len(self.notes),pitch=pitch,
-          mainNote=active['note'] if active else '—',message=self.message,settings=self.settings,
+          blocks=self.show_blocks,curve=self.show_curve,source=self.source,loop=self.loop,windowIndex=self.window_index,count=len(self.notes),pitch=playback['pitch'],
+          mainNote=playback['mainNote'],message=message,feedbackId=self.feedback_id,settings=self.settings,
           availablePitchModels=[k for k,v in PITCH_MODES.items() if v in self.series],
           gameNotesAvailable=bool(getattr(self,'game_notes_available',False)),
           highQualityAvailable=self.high_quality_available,
-          activeSeparation=self.song.get('algorithm',{}).get('separation','htdemucs') if self.song else '',
-          separationCached=bool(self.song and self.settings['separationModel'] in self.song.get('analysis_versions',{})),
+          activeSeparation=self.active_separation,
+          exportingStem=self.stem_export is not None,
+          harmonySeparated=self.active_separation in ('mel_bs', 'bs_only'),
+          separationCached=bool(self.song and self.default_separation in self.song.get('analysis_versions',{})),
           songSeparationBusy=bool(self.song and any(j.get('target_id')==self.song.get('song_id') and j['state'] in ['queued','running'] for j in self.data['jobs'])),
           activeNoteMode='game' if self.settings['noteMode']=='game' and getattr(self,'game_notes_available',False) else 'classic',
           activePitchModel=next((k for k,v in PITCH_MODES.items() if v==getattr(self,'primary',None)),self.settings['pitchModel']),
-          dark=self.settings['theme']=='dark' or (self.settings['theme']=='system' and QGuiApplication.styleHints().colorScheme()==Qt.ColorScheme.Dark),
+          dark=self.dark,
           volume=self.settings['volume'],muted=self.muted,loopA=self.loop_a,loopB=self.loop_b,loopAText=clock(self.loop_a),loopBText=clock(self.loop_b),canUndo=bool(self.trash),
-          job=bool(job),jobName=Path(job['source']).name if job else '',jobText=(' · '.join(filter(None,[job.get('message',''),job.get('computeStatus','')])) if job else ''),jobProgress=job.get('progress',0) if job else 0,
+          job=bool(job),jobName=Path(job['source']).name if job else '',jobText=job_text,jobProgress=job.get('progress',0) if job else 0,
+          jobId=job['id'] if job else '',jobMessage=job_message,jobQueued=bool(job and job['state']=='queued'),
           running=bool(self.active),canRetry=bool(job and job['state'] in ['failed','cancelled','interrupted']))
 
     def state_playing(self):return self.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState
@@ -148,23 +232,54 @@ class Controller(QObject):
             QTimer.singleShot(0,start)
     @Slot(int)
     def previewPiano(self,midi):
-        if not 21<=midi<=108:return
+        self.start_piano_preview(midi, hold=False)
+
+    def start_piano_preview(self, midi, *, hold):
+        if not 21<=midi<=108 or self.settings['pianoVolume']<=0:return
         try:
             if self.piano is None:self.preparePiano()
-            if self.settings['pianoVolume']<=0:return
-            self.piano.play(midi,110);self.preview_note=midi;self.preview_until=time.monotonic()+.85;self.changed.emit()
-            QTimer.singleShot(860,self.changed.emit)
-        except OSError:self.feedback('系统钢琴音源不可用，请检查 Windows 音频设备。')
+            self.piano_held = hold
+            if hold:self.piano.play(midi,110,hold=True)
+            else:self.piano.play(midi,110)
+            self.piano_highlight(midi)
+        except OSError:self.piano_failed()
+
+    def release_piano_preview(self):
+        if not self.piano_held:return
+        self.piano_held = False
+        self.preview_note = None
+        try:
+            self.piano.release()
+        except OSError:self.piano_failed()
+        else:self.changed.emit()
+
+    def piano_failed(self):
+        self.piano_held = False
+        self.preview_note = None
+        self.feedback('系统钢琴音源不可用，请检查 Windows 音频设备。')
+
     def preparePiano(self):
-        if self.piano is None:
+        if self.piano is None and not self.closing:
             from vocalpitchlab.audio.piano import Piano
-            self.piano=Piano(self)
-            self.piano.set_volume(self.settings['pianoVolume'])
-            self.piano.failed.connect(lambda:self.feedback('系统钢琴音源不可用，请检查 Windows 音频设备。'))
-            self.piano.played.connect(self.piano_highlight);self.piano.warm()
+            from vocalpitchlab.audio.sample_piano import SamplePiano
+            volume = self.settings['pianoVolume']
+            piano = SamplePiano(self)
+            piano.set_volume(volume)
+            try:
+                piano.warm()
+            except (OSError, RuntimeError):
+                piano.close();piano.deleteLater()
+                piano = Piano(self)
+                piano.set_volume(volume)
+            self.piano = piano
+            piano.failed.connect(self.piano_failed)
+            piano.played.connect(self.piano_highlight)
+            piano.warm()
     @Slot(int)
     def piano_highlight(self,midi):
-        self.preview_note=midi;self.preview_until=time.monotonic()+.85;self.changed.emit();QTimer.singleShot(860,self.changed.emit)
+        self.preview_note=midi;self.preview_until=float('inf') if self.piano_held else time.monotonic()+.85
+        self.changed.emit()
+        if not self.piano_held:QTimer.singleShot(860,self.changed.emit)
 
     def eventFilter(self,obj,event):
         if event.type() in [QEvent.Type.ShortcutOverride,QEvent.Type.KeyPress,QEvent.Type.KeyRelease] and event.key()==Qt.Key.Key_Space:
@@ -175,14 +290,23 @@ class Controller(QObject):
     @Slot(str,'QVariant')
     def setting(self,key,value):
         if key not in self.settings:return
+        if key == 'language':
+            if value not in LANGUAGES or value == self.settings[key]:
+                return
+            self.settings[key] = value
+            self.readout_time = -1.
+            self.save()
+            self.languageChanged.emit(value)
+            self.localizedContentChanged.emit()
+            self.changed.emit()
+            return
         if key in ['pitchModel','noteMode','pipelineVersion']:return
+        if key in ('reduceLoad', 'vocalSeparation') and (not isinstance(value,bool) or self.settings[key]==value):return
         if key=='compatiblePlayback':
             if not isinstance(value,bool) or self.settings[key]==value:return
             self.settings[key]=value;self.save()
             self.feedback('兼容播放设置已保存，重启软件后生效。');return
-        if key=='separationModel':
-            if value not in ['mel_bs','mel_roformer']:return
-            if not self.high_quality_available:self.feedback('人声模型尚未安装。');return
+        if key=='separationModel' and value not in ('mel_bs','mel_roformer'):return
         if key=='noteMode':
             if value not in ['game','classic']:return
             if value=='game' and self.song and not self.game_notes_available:return
@@ -206,6 +330,7 @@ class Controller(QObject):
     @Slot(float)
     def setPianoVolume(self,value):
         self.settings['pianoVolume']=float(np.clip(value,0,1))
+        if self.settings['pianoVolume']==0:self.release_piano_preview()
         if self.piano:self.piano.set_volume(self.settings['pianoVolume'])
         self.save();self.changed.emit()
     @Slot()
@@ -217,11 +342,12 @@ class Controller(QObject):
         current=self.song;self.trash=[(i,self.data['songs'][i]) for i in targets]
         self.data['songs']=[s for i,s in enumerate(self.data['songs']) if i not in targets]
         if self.selected in targets:
+            self.release_piano_preview()
             self.changing=True;self.player.stop();self.vocal_player.stop();self.player.setSource(QUrl());self.vocal_player.setSource(QUrl());self.audio_song=None;self.changing=False
             self.song=None;self.series={};self.notes=[];self.selected=-1;self.t=0.;self.loop=False;self.pending=None;self.buffer_seek=None;self.resume=False
             if self.data['songs']:self.selectSong(min(targets[0],len(self.data['songs'])-1))
         elif current:self.selected=next(i for i,s in enumerate(self.data['songs']) if s is current)
-        self.data['last_song']=max(0,self.selected);self.save();self.contentChanged.emit();self.feedback(f'已移除 {len(targets)} 首歌曲，原文件保留。')
+        self.data['last_song']=max(0,self.selected);self.save();self.contentChanged.emit();self.feedback('已移除 {count} 首歌曲，原文件保留。', count=len(targets))
     @Slot()
     def undoDelete(self):
         if not self.trash:return
@@ -248,22 +374,35 @@ class Controller(QObject):
         if self.player.mediaStatus() in [QMediaPlayer.MediaStatus.StalledMedia,QMediaPlayer.MediaStatus.InvalidMedia,QMediaPlayer.MediaStatus.NoMedia,QMediaPlayer.MediaStatus.EndOfMedia]:return
         self.t=min(self.song['duration'],self.presentation.value(time.monotonic()))
         if self.loop and self.t>=self.loop_b:self.seek(self.loop_a)
-        else:self.changed.emit()
+        else:self.frameChanged.emit()
+    def update_presentation_timer(self):
+        if not self.closing and self.presentation_visible and self.state_playing():self.timer.start()
+        else:self.timer.stop()
+    @Slot(bool)
+    def setPresentationVisible(self,visible):
+        self.presentation_visible=visible;self.update_presentation_timer()
+        if visible:
+            if self.state_playing():self.tick()
+            else:self.frameChanged.emit()
+        else:self.release_piano_preview()
     def playback_changed(self,state):
         if state==QMediaPlayer.PlaybackState.PlayingState:
-            self.vocal_player.setPosition(self.player.position());self.vocal_player.play()
+            if self.active_separation != 'original':
+                self.vocal_player.setPosition(self.player.position());self.vocal_player.play()
         elif state==QMediaPlayer.PlaybackState.PausedState:self.vocal_player.pause()
         else:self.vocal_player.stop()
         if not self.changing:
             self.presentation.reset(self.player.position()/1000,time.monotonic())
             self.t=self.player.position()/1000
             self.presentation_pending=state==QMediaPlayer.PlaybackState.PlayingState
+        self.update_presentation_timer()
         self.changed.emit()
 
     @Slot(int)
     def selectSong(self,index):
         if not 0<=index<len(self.data['songs']):return
         if self.song is self.data['songs'][index]:return
+        self.release_piano_preview()
         self.remember_view()
         if not getattr(self,'analysis_swap',False):
             self.changing=True;self.player.stop();self.vocal_player.stop();self.changing=False
@@ -400,15 +539,16 @@ class Controller(QObject):
         width=duration if self.span==0 else min(self.span,duration)
         left=max(0,min(self.t-width*.3,duration-width));return left,left+max(.01,width)
     @Slot()
-    def fitRange(self):
+    def fitRange(self,notify=True):
         if not self.song:return
-        a,b=self.x_range();times,values=self.series[self.primary];v=values[(times>=a)&(times<=b)];v=v[np.isfinite(v)]
+        previous=(self.low,self.high)
+        a,b=self.x_range();times,values=self.series[self.primary];start=np.searchsorted(times,a);end=np.searchsorted(times,b,side='right');v=values[start:end];v=v[np.isfinite(v)]
         if not len(v):v=values[np.isfinite(values)]
         if len(v):
             self.low=math.floor(float(v.min()))-2;self.high=math.ceil(float(v.max()))+2
             if self.high-self.low<12:
                 middle=(self.high+self.low)/2;self.low=middle-6;self.high=middle+6
-        self.changed.emit()
+        if notify or previous!=(self.low,self.high):self.changed.emit()
     @Slot(bool)
     def setAutoRange(self,on):self.auto=on;self.fitRange() if on else self.changed.emit()
     @Slot(float)
@@ -498,40 +638,45 @@ class Controller(QObject):
     def position(self,ms,force=False):
         if self.changing:return
         audio_t=ms/1000
+        playing=self.state_playing()
         if force or self.player.playbackState()!=QMediaPlayer.PlaybackState.PlayingState:
             self.presentation.reset(audio_t,time.monotonic());self.t=audio_t
         elif self.presentation_pending:
             self.presentation.reset(audio_t,time.monotonic());self.t=audio_t;self.presentation_pending=False
         else:self.t=self.presentation.feed(audio_t,time.monotonic())
-        if self.song and self.loop and self.state['playing'] and self.t>=self.loop_b:self.seek(self.loop_a);return
-        if self.auto:self.fitRange()
-        else:self.changed.emit()
+        if self.song and self.loop and playing and self.t>=self.loop_b:self.seek(self.loop_a);return
+        if self.auto:self.fitRange(notify=False)
+        if force or not playing:self.frameChanged.emit()
     @Slot(str)
     def setSource(self,source):
         if source not in ['original','vocals']:return
-        self.source=source
+        self.source='original' if self.active_separation=='original' else source
         if not self.song:return
         if self.audio_song is self.song:
             self.apply_audio();self.changed.emit();return
         self.audio_song=self.song
+        vocal_path = self.song['audio']['vocals'] if self.active_separation != 'original' else None
         try:self.vocal_boost=float(self.song.get('presentation',{}).get('gain',1.))
         except (OSError,ValueError,RuntimeError):self.vocal_boost=1.
         if getattr(self,'analysis_swap',False):
             self.t=self.player.position()/1000
             self.presentation.reset(self.t,time.monotonic())
-            self.swap_vocal_source(self.song['audio']['vocals'])
+            self.swap_vocal_source(vocal_path)
             self.apply_audio();self.changed.emit();return
         self.revision+=1;self.pending=round(self.t*1000);self.buffer_seek=self.pending;self.resume=self.state['playing'];self.changing=True
-        self.player.stop();self.vocal_player.stop();self.vocal_pending=True;self.vocal_player.setSource(QUrl.fromLocalFile(self.song['audio']['vocals']));self.player.setSource(QUrl.fromLocalFile(self.song['audio']['original']));self.apply_audio();self.changing=False;self.changed.emit()
+        self.player.stop();self.vocal_player.stop()
+        self.vocal_pending=bool(vocal_path);self.vocal_buffer_pending=False
+        self.vocal_player.setSource(QUrl.fromLocalFile(vocal_path) if vocal_path else QUrl())
+        self.player.setSource(QUrl.fromLocalFile(self.song['audio']['original']));self.apply_audio();self.changing=False;self.changed.emit()
         self.media(self.player.mediaStatus())
         self.vocal_ready(self.vocal_player.mediaStatus())
     def swap_vocal_source(self,path):
         # Keep the original player as the uninterrupted transport clock.
         # Reload only the vocal source; vocal_ready rejoins the live position.
-        self.vocal_pending=True
-        self.vocal_buffer_pending=True
+        self.vocal_pending=bool(path)
+        self.vocal_buffer_pending=bool(path)
         self.vocal_player.stop()
-        self.vocal_player.setSource(QUrl.fromLocalFile(path))
+        self.vocal_player.setSource(QUrl.fromLocalFile(path) if path else QUrl())
         self.vocal_ready(self.vocal_player.mediaStatus())
     def media(self,status):
         if self.changing:return
@@ -558,6 +703,69 @@ class Controller(QObject):
             from vocalpitchlab.analysis.main_notes import export_notes
             export_notes(local_path(url),self.notes);self.feedback('音符列表已导出。')
         except Exception:self.feedback('导出失败，请选择可写入的文件位置。')
+
+    @Slot(result='QVariantList')
+    def stemExportOptions(self):
+        from vocalpitchlab.audio.stem_export import stem_sources
+        try:
+            tracks = stem_sources(self.song) if self.song else {}
+        except (OSError, ValueError, RuntimeError):
+            tracks = {}
+        self.stem_options = (self.song, tracks)
+        if not tracks:
+            self.feedback('没有可导出的分离音轨。')
+        return list(tracks)
+
+    @Slot(str, result=QUrl)
+    def prepareStemExport(self, track):
+        if self.closing or self.stem_export or self.stem_export_request:
+            return QUrl()
+        song, tracks = self.stem_options
+        if not song or song is not self.song:
+            self.feedback('歌曲已切换，请重新选择音轨。')
+            return QUrl()
+        if track not in tracks:
+            self.feedback('没有可导出的分离音轨。')
+            return QUrl()
+        self.stem_export_request = (song, tracks[track], tracks)
+        music = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.MusicLocation)
+        folder = Path(music) if music and Path(music).is_dir() else Path.home()
+        name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', song['name'])[:120].strip(' .')
+        return QUrl.fromLocalFile(str(folder / f'{name or "audio"}-{track}.wav'))
+
+    @Slot()
+    def discardStemExport(self):
+        self.stem_export_request = None
+
+    @Slot(QUrl)
+    def exportStem(self, url):
+        request, self.stem_export_request = self.stem_export_request, None
+        if not request or not url.isLocalFile() or self.stem_export or self.closing:
+            return
+        song, sources, tracks = request
+        protected = {str(path) for inputs in tracks.values() for path in inputs if isinstance(path, Path)}
+        songs = [song, *self.data['songs'], *(removed for _, removed in self.trash)]
+        for entry in songs:
+            for result in (entry, *entry.get('analysis_versions', {}).values()):
+                audio = result.get('audio', {})
+                protected.update(filter(None, (*audio.values(), result.get('source'), result.get('full_vocals'))))
+                if audio.get('vocals') and result.get('algorithm', {}).get('pipeline') == 'lead-default-v1':
+                    protected.add(str(Path(audio['vocals']).with_name('all-vocals.wav')))
+        for job in self.data['jobs']:
+            if job['state'] in ('running', 'queued'):
+                protected.add(job['source'])
+        self.stem_export = StemExport(Path(url.toLocalFile()), sources, protected, self)
+        self.stem_export.finished.connect(self.stem_export_finished)
+        self.stem_export.start()
+        self.feedback('')
+
+    @Slot()
+    def stem_export_finished(self):
+        worker, self.stem_export = self.stem_export, None
+        worker.deleteLater()
+        if not self.closing:
+            self.feedback(worker.message)
+
     @Slot(str)
     def saveRemark(self,text):
         if not self.song:return
@@ -592,8 +800,9 @@ class Controller(QObject):
         for s in self.data['songs']:
             if s.get('source') and matching(s['source']) and not any(matching(j['source']) for j in self.data['jobs']):
                 self.feedback('这首歌已在歌曲库中。');return
-        self.data['jobs'].append(dict(id=uuid.uuid4().hex,source=str(path),signature=signature,separation=self.settings['separationModel'],state='queued',progress=0,message='等待分析'))
+        self.data['jobs'].append(dict(id=uuid.uuid4().hex,source=str(path),signature=signature,separation=self.default_separation,state='queued',progress=0,message='等待分析'))
         self.save();self.contentChanged.emit();self.start_next()
+        if not self.active:self.changed.emit()
     def install_analysis(self,song,target_id):
         index=next((i for i,s in enumerate(self.data['songs']) if s.get('song_id')==target_id),None)
         if index is None:return False
@@ -615,20 +824,26 @@ class Controller(QObject):
         self.save();return True
     @Slot()
     def applySeparation(self):
-        self.apply_song_separation(self.settings['separationModel'])
+        self.apply_song_separation(self.default_separation)
     @Slot(bool)
     def setSongHarmony(self,enabled):
-        self.apply_song_separation('mel_bs' if enabled else 'mel_roformer')
+        if self.active_separation in ('original', 'bs_only'):
+            self.apply_song_separation('bs_only' if enabled else 'original')
+        else:
+            self.apply_song_separation('mel_bs' if enabled else 'mel_roformer')
     def apply_song_separation(self,mode):
         if not self.song:return
         target=self.song['song_id']
-        if mode==self.song.get('algorithm',{}).get('separation','htdemucs'):return
+        if mode==self.active_separation:return
         if any(j.get('target_id')==target and j['state'] in ['running','queued'] for j in self.data['jobs']):
             self.feedback('这首歌已在分析队列中。');return
         cached=self.song.get('analysis_versions',{}).get(mode)
         if cached and all(Path(p).is_file() for p in list(cached['audio'].values())+list(cached['curves'].values())+[cached['main_notes']]):
             self.install_analysis(cached,target);self.feedback('已切换人声分离结果。');return
-        if not self.high_quality_available:self.feedback('人声模型尚未安装。');return
+        if mode in ('mel_roformer', 'mel_bs') and not self.high_quality_available:
+            self.feedback('人声模型尚未安装。');return
+        if mode in ('bs_only', 'mel_bs') and not self.harmony_available:
+            self.feedback('和声分离模型尚未安装。');return
         source=Path(self.song.get('source',''))
         if not source.is_file():source=Path(self.song['audio']['original'])
         if not source.is_file():self.feedback('原音频已不存在，请重新导入。');return
@@ -650,16 +865,16 @@ class Controller(QObject):
         self.save();self.contentChanged.emit();self.changed.emit()
     @Slot()
     def removeDisplayedJob(self):
-        job=self.active or self.display_job
+        job=self.presented_job()
         if job:self.removeJob(job['id'])
     def start_next(self):
         if self.closing or self.active or (self.process and (not self.reusable_worker or self.worker_closing)):return
-        job=next((j for j in self.data['jobs'] if j['state']=='queued'),None)
+        job=self.queued_job()
         if not job:
             if self.process and self.reusable_worker and not self.worker_closing:
                 self.worker_closing=True;self.process.closeWriteChannel()
             return
-        self.active=job;self.display_job=job;job.update(state='running',message='准备分析');self.save();self.buffer=''
+        self.active=job;self.display_job=job;job.update(state='running',message='准备分析');self.save();self.buffer=b''
         self.result_file=self.folder/(job['id']+'-result.json');self.log_file=self.folder/(job['id']+'.log')
         if self.process is None:
             p=QProcess(self);self.process=p;self.worker_closing=False
@@ -684,11 +899,12 @@ class Controller(QObject):
 
     def read_progress(self):
         if not self.process:return
-        text=bytes(self.process.readAllStandardOutput()).decode('utf-8',errors='replace')
-        with self.log_file.open('a',encoding='utf-8') as f:f.write(text)
-        self.buffer+=text
-        while '\n' in self.buffer:
-            line,self.buffer=self.buffer.split('\n',1)
+        output=bytes(self.process.readAllStandardOutput())
+        with self.log_file.open('ab') as f:f.write(output)
+        self.buffer+=output
+        while b'\n' in self.buffer:
+            line,self.buffer=self.buffer.split(b'\n',1)
+            line=line.decode('utf-8',errors='replace')
             if line.startswith('VPL_JOB_DONE ') and self.reusable_worker and self.active:
                 try:
                     done=json.loads(line[13:])
@@ -756,9 +972,13 @@ class Controller(QObject):
             replacement={k:v for k,v in job.items() if k not in ['id','state','message','progress','remove_after_stop']}
             replacement.update(id=uuid.uuid4().hex,state='queued',message='等待重试',progress=0)
             job['state']='retried';self.data['jobs'].append(replacement);self.save();self.contentChanged.emit();self.start_next()
+            if not self.active:self.changed.emit()
     @Slot()
     def shutdown(self):
         self.closing=True;self.presentation_queue.clear()
+        if self.stem_export:
+            self.stem_export.requestInterruption()
+            self.stem_export.wait()
         if self.presentation_process:
             self.presentation_process.blockSignals(True);self.presentation_process.kill();self.presentation_process.waitForFinished(3000);self.presentation_process=None
         self.remember_view();self.memory_timer.stop();self.changing=True;self.player.stop();self.changing=False
@@ -774,28 +994,70 @@ class Controller(QObject):
 class PitchView(QQuickPaintedItem):
     controllerChanged=Signal()
     def __init__(self,parent=None):
-        super().__init__(parent);self._controller=None;self.setAntialiasing(True);self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton);self.setAcceptHoverEvents(True);self.hover_point=None;self.curve_cache={};self.cache_song=None;self.drag=None
+        super().__init__(parent);self._controller=None;self.setAntialiasing(True);self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton);self.setAcceptHoverEvents(True);self.hover_point=None;self.curve_cache=OrderedDict();self.cache_song=None;self.drag=None
+        self.detail_key=None;self.detail_source=None;self.detail_chunks=OrderedDict();self.pen_cache={};self.controller_connections=[]
+        self.piano_pressed = False
+        self.layers=PlotLayers(self,note)
+        self.layer_allocation_failed=False
+        self.setOpaquePainting(True);self.setFillColor(QColor())
+        self.observed_window=None;self.dpr_timer=QTimer(self);self.dpr_timer.setSingleShot(True);self.dpr_timer.timeout.connect(self.request_frame)
+        self.widthChanged.connect(self.request_frame);self.heightChanged.connect(self.request_frame);self.windowChanged.connect(self.attach_window)
+        self.attach_window(self.window())
     @Property(QObject,notify=controllerChanged)
     def controller(self):return self._controller
     @controller.setter
     def controller(self,value):
+        self.end_piano_press()
+        for connection in self.controller_connections:QObject.disconnect(connection)
+        self.controller_connections=[]
         self._controller=value
-        if value:value.changed.connect(self.update);value.contentChanged.connect(self.update)
-        self.controllerChanged.emit();self.update()
+        if value:self.controller_connections=[value.frameChanged.connect(self.request_frame),value.contentChanged.connect(self.request_frame)]
+        self.controllerChanged.emit();self.request_frame()
+    def request_frame(self,*args):
+        if self.layer_allocation_failed:self.update();return
+        try:
+            if not self.layers.sync():self.update()
+        except MemoryError:
+            self.layer_allocation_failed=True;self.layers.hide(release=True);self.update()
+    def attach_window(self,window):
+        if self.observed_window is not None:
+            self.end_piano_press()
+            try:self.observed_window.removeEventFilter(self)
+            except RuntimeError:pass
+        self.observed_window=window
+        if window is not None:window.installEventFilter(self)
+        self.request_frame()
+    def eventFilter(self,obj,event):
+        if obj is self.observed_window:
+            if event.type()==QEvent.Type.DevicePixelRatioChange:self.dpr_timer.start(0)
+            elif event.type() in (QEvent.Type.FocusOut, QEvent.Type.WindowDeactivate, QEvent.Type.Hide):self.end_piano_press()
+        return False
     def geometry_values(self):
         return 68,50,max(1,self.width()-80),max(1,self.height()-62)
     def curve_samples(self,key,span,pixels):
         b=self._controller;times,values=b.series[key]
+        if self.cache_song is not b.song:
+            self.curve_cache.clear();self.cache_song=b.song
         step=(times[-1]-times[0])/max(1,len(times)-1) if len(times)>1 else .01
         stride=lod_stride(span,pixels,step)
         overview=span>=40
         if overview:stride=max(stride,int(span/max(1,pixels)/step*3))
-        cache_key=(id(values),stride,overview)
+        cache_key=(id(times),id(values),stride,overview)
         if cache_key not in self.curve_cache:
-            # At most a handful of fixed levels for the selected recording.
-            if self.cache_song is not b.song:self.curve_cache.clear();self.cache_song=b.song
-            self.curve_cache[cache_key]=(melody_outline if overview else stable_envelope)(times,values,stride)
-        return self.curve_cache[cache_key]
+            self.curve_cache[cache_key]=(times,values,(melody_outline if overview else stable_envelope)(times,values,stride))
+            if len(self.curve_cache)>8:self.curve_cache.popitem(last=False)
+        self.curve_cache.move_to_end(cache_key)
+        return self.curve_cache[cache_key][2]
+    def curve_pens(self,dark,overview):
+        key=(dark,overview)
+        if key not in self.pen_cache:
+            pens=[]
+            for i in range(64):
+                level=(i%16)/15;weight=.35+.65*(i//16)/3
+                color=QColor('#8bc4ff' if dark else '#175b9f');color.setAlphaF((.68+.30*level)*weight)
+                pen=QPen(color,(1.2+3.2*level)*(.72 if overview else 1)*(.65+.35*weight));pen.setCapStyle(Qt.PenCapStyle.RoundCap);pens.append(pen)
+            self.pen_cache[key]=pens
+        return self.pen_cache[key]
     def draw_curve(self,p,times,values,x,y,dark):
         b=self._controller
         levels=np.interp(times,*b.loudness)
@@ -811,11 +1073,53 @@ class PitchView(QQuickPaintedItem):
                 buckets[category*16+bucket].append(QLineF(previous,point))
             previous=point;previous_level=level;previous_emphasis=weight
         p.setBrush(Qt.BrushStyle.NoBrush)
-        for i,lines in enumerate(buckets):
-            level=(i%16)/15;weight=.35+.65*(i//16)/3
-            color=QColor('#8bc4ff' if dark else '#175b9f');color.setAlphaF((.68+.30*level)*weight)
-            span=b.span or b.song['duration'];scale=1 if span<40 else .72
-            pen=QPen(color,(1.2+3.2*level)*scale*(.65+.35*weight));pen.setCapStyle(Qt.PenCapStyle.RoundCap);p.setPen(pen);p.drawLines(lines)
+        span=b.span or b.song['duration']
+        for pen,lines in zip(self.curve_pens(dark,span>=40),buckets):
+            if lines:p.setPen(pen);p.drawLines(lines)
+    def draw_detail_curve(self,p,span,w,h,left,right,x,dark):
+        """Reuse pixel-space segments in fixed chunks while the viewport scrolls.
+
+        Keep the same samples, gaps, colors and line widths as draw_curve.
+        Only the visible chunks are built; their LRU is bounded to 16384 segments.
+        """
+        b=self._controller;times,values=self.curve_samples(b.primary,span,w)
+        if len(times)<2:return
+        reliability=b.curve_reliability.get(b.primary) if b.settings.get('cleanCurve',True) else None
+        key=(id(times),id(values),id(b.loudness[0]),id(b.loudness[1]),
+             id(reliability[0]) if reliability is not None else None,id(reliability[1]) if reliability is not None else None,
+             span,w,h,b.low,b.high,self.geometry_values()[1])
+        if self.detail_key!=key:
+            levels=np.interp(times,*b.loudness)
+            emphasis=np.interp(times,*reliability) if reliability is not None else np.ones(len(times))
+            intensity=np.minimum(15,((levels[:-1]+levels[1:])*.5*16).astype(int))
+            category=np.clip(np.rint(((emphasis[:-1]+emphasis[1:])*.5-.35)/.65*3),0,3).astype(int)
+            self.detail_styles=(category*16+intensity).astype(np.int8)
+            self.detail_styles[~(np.isfinite(values[:-1])&np.isfinite(values[1:]))]=-1
+            self.detail_chunks.clear();self.detail_key=key
+            # Retain sources so replacing arrays cannot reuse a cached identity.
+            self.detail_source=(times,values,b.loudness,reliability)
+        a,c=np.searchsorted(times,[left,right]);start=max(0,a-1);end=min(len(times)-1,c)
+        buckets=[[] for _ in range(64)]
+        for chunk in range(start//256,(end+255)//256):
+            if chunk not in self.detail_chunks:
+                lo=chunk*256;hi=min(lo+256,len(times)-1)
+                styles=self.detail_styles[lo:hi];groups={}
+                px=times[lo:hi+1]*(w/span);py=self.geometry_values()[1]+(b.high-values[lo:hi+1])/(b.high-b.low)*h
+                for style in np.unique(styles):
+                    if style<0:continue
+                    indices=np.flatnonzero(styles==style)
+                    groups[int(style)]=(indices+lo,[QLineF(float(px[i]),float(py[i]),float(px[i+1]),float(py[i+1])) for i in indices])
+                self.detail_chunks[chunk]=groups
+                if len(self.detail_chunks)>64:self.detail_chunks.popitem(last=False)
+            self.detail_chunks.move_to_end(chunk)
+            for style,(indices,lines) in self.detail_chunks[chunk].items():
+                if chunk*256<start or (chunk+1)*256>end:
+                    first,last=np.searchsorted(indices,[start,end]);lines=lines[first:last]
+                buckets[style].extend(lines)
+        p.save();p.translate(x(0),0);p.setBrush(Qt.BrushStyle.NoBrush)
+        for pen,lines in zip(self.curve_pens(dark,span>=40),buckets):
+            if lines:p.setPen(pen);p.drawLines(lines)
+        p.restore()
     def draw_block(self,p,rect,dark,selected=False):
         fill=QLinearGradient(rect.topLeft(),rect.bottomLeft())
         fill.setColorAt(0,QColor(('#485d73' if selected else '#354455') if dark else ('#d2e4f5' if selected else '#e3ecf5')))
@@ -824,7 +1128,8 @@ class PitchView(QQuickPaintedItem):
         radius=min(4,rect.height()/2);p.drawRoundedRect(rect,radius,radius)
     def long_curve_layer(self,span,w,h,color):
         b=self._controller;dpr=self.window().devicePixelRatio() if self.window() else 1.
-        dark=b.state['dark'];key=(id(b.series[b.primary][1]),span,w,h,b.low,b.high,dpr,b.show_blocks,b.show_curve,dark,b.settings.get('cleanCurve',True))
+        reliability=b.curve_reliability.get(b.primary)
+        dark=b.dark;key=(id(b.song),b.song['duration'],id(b.series[b.primary][0]),id(b.series[b.primary][1]),id(b.notes),id(b.loudness[0]),id(b.loudness[1]),id(reliability[0]) if reliability is not None else None,id(reliability[1]) if reliability is not None else None,span,w,h,b.low,b.high,dpr,b.show_blocks,b.show_curve,dark,b.settings.get('cleanCurve',True))
         if getattr(self,'layer_key',None)==key:return self.layer
         width=math.ceil(b.song['duration']/span*w)+2
         layer=QImage(math.ceil(width*dpr),math.ceil((h+2)*dpr),QImage.Format.Format_ARGB32_Premultiplied);layer.setDevicePixelRatio(dpr);layer.fill(0)
@@ -836,15 +1141,10 @@ class PitchView(QQuickPaintedItem):
         if b.show_curve:
             times,values=self.curve_samples(b.primary,span,w)
             self.draw_curve(painter,times,values,lambda t:t/span*w,lambda v:(b.high-v)/(b.high-b.low)*h,dark)
-        painter.end();self.layer_key=key;self.layer=layer
+        painter.end();self.layer_key=key;self.layer=layer;self.layer_source=(b.song,b.series[b.primary],b.notes,b.loudness,reliability)
         return layer
-    def paint(self,p):
+    def interaction_context(self,left,right,x,y,x0,y0,w,h):
         b=self._controller
-        if not b or not b.song:return
-        state=b.state;dark=state['dark'];fg='#e0e7f4' if dark else '#344761';muted='#9eaec5' if dark else '#72809a';grid='#2b2e34' if dark else '#edf0f3';band='#23262c' if dark else '#f7f8fa';bg='#202226' if dark else '#ffffff'
-        x0,y0,w,h=self.geometry_values();left,right=b.x_range();span=min(b.span or b.song['duration'],b.song['duration'])
-        x=lambda t:x0+(t-left)/span*w;y=lambda m:y0+(b.high-m)/(b.high-b.low)*h
-        p.fillRect(self.boundingRect(),QColor(bg));p.setFont(QFont('Microsoft YaHei',9))
         visible=[n for n in b.notes if n['end']>=left and n['start']<=right]
         active=next((n for n in visible if n['start']<=b.t<n['end']),None)
         hovered=None;key_pitch=None;key_notes=[]
@@ -857,6 +1157,18 @@ class PitchView(QQuickPaintedItem):
                 hovered=next((n for n in visible if x(n['start'])-2<=hx<=x(n['end'])+2 and abs(hy-y(n['midi']))<=max(6,h*.4/(b.high-b.low))),None)
         highlighted=hovered or (active if b.settings['liveNotes'] else None)
         highlighted_pitch=key_pitch if key_pitch is not None else highlighted['midi'] if highlighted else None
+        return dict(visible=visible,active=active,hovered=hovered,key_pitch=key_pitch,key_notes=key_notes,highlighted_pitch=highlighted_pitch)
+    def paint(self,p):
+        b=self._controller
+        if not b or not b.song:return
+        if self.layers.active:
+            self.layers.paint_background(p);return
+        state=b.playback;dark=b.dark;fg='#e0e7f4' if dark else '#344761';muted='#9eaec5' if dark else '#72809a';grid='#2b2e34' if dark else '#edf0f3';band='#23262c' if dark else '#f7f8fa';bg='#202226' if dark else '#ffffff'
+        x0,y0,w,h=self.geometry_values();left,right=b.x_range();span=min(b.span or b.song['duration'],b.song['duration'])
+        x=lambda t:x0+(t-left)/span*w;y=lambda m:y0+(b.high-m)/(b.high-b.low)*h
+        p.fillRect(self.boundingRect(),QColor(bg));p.setFont(QFont('Microsoft YaHei',9))
+        context=self.interaction_context(left,right,x,y,x0,y0,w,h)
+        visible=context['visible'];active=context['active'];hovered=context['hovered'];key_pitch=context['key_pitch'];key_notes=context['key_notes'];highlighted_pitch=context['highlighted_pitch']
         p.save();p.setClipRect(QRectF(0,y0,self.width(),h))
         for midi in range(math.floor(b.low),math.ceil(b.high)+1):
             row=QRectF(x0,y(midi+.5),w,h/(b.high-b.low))
@@ -880,7 +1192,9 @@ class PitchView(QQuickPaintedItem):
         p.restore();p.save();p.setClipRect(QRectF(x0,y0,w,h))
         if b.loop:p.fillRect(QRectF(x(b.loop_a),y0,x(b.loop_b)-x(b.loop_a),h),QColor('#124c97ff'))
         color=QColor(fg)
-        cached_layer=span>=40 and b.song['duration']/span*w<16000
+        dpr=self.window().devicePixelRatio() if self.window() else 1.
+        layer_width=math.ceil(b.song['duration']/span*w)+2
+        cached_layer=span>=40 and layer_width<16000 and math.ceil(layer_width*dpr)*math.ceil((h+2)*dpr)*4<=32*1024**2
         if cached_layer:
             p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform,True)
             p.drawImage(QPointF(x0-left/span*w,y0),self.long_curve_layer(span,w,h,color))
@@ -894,8 +1208,7 @@ class PitchView(QQuickPaintedItem):
                 if b.show_curve and not selected_path.isEmpty():
                     # Preserve the curve above selected blocks without invalidating the overview cache.
                     p.save();p.setClipPath(selected_path,Qt.ClipOperation.IntersectClip)
-                    times,values=self.curve_samples(b.primary,span,w);a,c=np.searchsorted(times,[left,right])
-                    self.draw_curve(p,times[max(0,a-1):c+1],values[max(0,a-1):c+1],x,y,dark);p.restore()
+                    self.draw_detail_curve(p,span,w,h,left,right,x,dark);p.restore()
         else:
             if b.show_blocks:
                 for n in visible:
@@ -903,8 +1216,7 @@ class PitchView(QQuickPaintedItem):
                     rect=QRectF(x(n['start']),y(n['midi'])-nh/2,max(1.5,x(n['end'])-x(n['start'])),nh)
                     self.draw_block(p,rect,dark,n is hovered or n is active or n['midi']==key_pitch)
             if b.show_curve:
-                times,values=self.curve_samples(b.primary,span,w);a,c=np.searchsorted(times,[left,right])
-                self.draw_curve(p,times[max(0,a-1):c+1],values[max(0,a-1):c+1],x,y,dark)
+                self.draw_detail_curve(p,span,w,h,left,right,x,dark)
         guide=hovered or (min(key_notes,key=lambda n:n['start']) if key_notes else None)
         if guide:
             guide_color=QColor('#77b8ff' if dark else '#318ce8')
@@ -918,9 +1230,9 @@ class PitchView(QQuickPaintedItem):
                 p.setPen(QColor('#101834' if dark else '#ffffff'));p.drawText(QRectF(x(edge)-8,y0,16,20),Qt.AlignmentFlag.AlignCenter,label)
         p.setPen(QPen(QColor('#60aaff' if dark else '#0071e3'),1.3));p.drawLine(QPointF(x(b.t),y0),QPointF(x(b.t),y0+h));p.restore()
         labels=[]
-        if b.settings['liveNotes']:labels.append(('主音',state['mainNote'],''))
+        if b.settings['liveNotes']:labels.append((localized(b.settings.get('language'), '主音'),state['mainNote'],''))
         if b.settings['liveCurve']:
-            parts=state['pitch'].split(' ',1);labels.append(('曲线',parts[0],parts[1] if len(parts)>1 else ''))
+            parts=state['pitch'].split(' ',1);labels.append((localized(b.settings.get('language'), '曲线'),parts[0],parts[1] if len(parts)>1 else ''))
         if labels:
             box_w=116*len(labels);box_h=48
             bx=max(x0,min(x(b.t)-box_w/2,x0+w-box_w));by=max(2,y0-box_h-8)
@@ -940,7 +1252,9 @@ class PitchView(QQuickPaintedItem):
         if b and b.song:
             a,c=b.x_range();x0,y0,w,h=self.geometry_values();px,py=event.position().x(),event.position().y()
             if 0<=px<x0 and y0<=py<=y0+h:
-                b.previewPiano(int(round(b.high-(py-y0)/h*(b.high-b.low))));event.accept();return
+                self.piano_pressed = True
+                b.start_piano_preview(int(round(b.high-(py-y0)/h*(b.high-b.low))), hold=True)
+                event.accept();return
             if not (x0<=px<=x0+w and y0<=py<=y0+h):event.ignore();return
             position=float(np.clip(a+(px-x0)/w*(c-a),0,b.song['duration']))
             mode='new'
@@ -954,6 +1268,7 @@ class PitchView(QQuickPaintedItem):
     def mouseDoubleClickEvent(self,event):
         self.mousePressEvent(event)
     def mouseMoveEvent(self,event):
+        if self.piano_pressed:event.accept();return
         if not self.drag:return
         b=self._controller;a,c=b.x_range();x0,y0,w,h=self.geometry_values();px=event.position().x()
         self.drag['end']=float(np.clip(a+(px-x0)/w*(c-a),0,b.song['duration']))
@@ -966,16 +1281,24 @@ class PitchView(QQuickPaintedItem):
             b.loop=True;b.changed.emit()
         event.accept()
     def mouseReleaseEvent(self,event):
+        if self.piano_pressed:
+            self.end_piano_press();event.accept();return
         if not self.drag:return
         b=self._controller;drag=self.drag;self.drag=None;b.drag_view=None
         if drag['moved']:b.setLoop(True);b.seek(b.loop_a)
         else:b.seek(drag['start'])
         if drag['resume']:b.player.play()
         b.changed.emit();event.accept()
+    def end_piano_press(self):
+        if not self.piano_pressed:return
+        self.piano_pressed = False
+        self._controller.release_piano_preview()
+    def mouseUngrabEvent(self):
+        self.end_piano_press()
     def hoverMoveEvent(self,event):
         self.hover_point=(event.position().x(),event.position().y())
-        self.setCursor(Qt.CursorShape.PointingHandCursor if event.position().x()<self.geometry_values()[0] else Qt.CursorShape.CrossCursor);self.update()
-    def hoverLeaveEvent(self,event):self.hover_point=None;self.update()
+        self.setCursor(Qt.CursorShape.PointingHandCursor if event.position().x()<self.geometry_values()[0] else Qt.CursorShape.CrossCursor);self.request_frame()
+    def hoverLeaveEvent(self,event):self.hover_point=None;self.request_frame()
     def wheelEvent(self,event):
         steps=(event.angleDelta().y() or event.angleDelta().x())/120
         if not steps:steps=(event.pixelDelta().y() or event.pixelDelta().x())/40
@@ -985,7 +1308,10 @@ class PitchView(QQuickPaintedItem):
 from PySide6.QtCore import QPointF,QLineF
 def create_engine(controller):
     qmlRegisterType(PitchView,'VocalPitch',1,0,'PitchView')
-    engine=QQmlApplicationEngine();engine.rootContext().setContextProperty('backend',controller)
+    engine = LocalizedEngine()
+    engine.rootContext().setContextProperty('backend',controller)
+    engine.set_language(controller.settings['language'])
+    controller.languageChanged.connect(engine.set_language)
     engine.load(QUrl.fromLocalFile(str(ROOT/'qml/Main.qml')));return engine
 def main():
     if sys.platform=='win32':

@@ -11,10 +11,12 @@ import uuid
 from vocalpitchlab.runtime.paths import DATA_ROOT
 
 
-def digest_file(path):
+def digest_file(path, interrupted=None):
     h = hashlib.sha256()
     with Path(path).open('rb') as stream:
         for block in iter(lambda: stream.read(4 * 1024 * 1024), b''):
+            if interrupted is not None and interrupted():
+                return None
             h.update(block)
     return h.hexdigest()
 

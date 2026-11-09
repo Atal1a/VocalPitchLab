@@ -2,7 +2,7 @@
   #error StageDir must point to a prepared application directory
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.1.2"
+  #define AppVersion "1.2.0"
 #endif
 #ifndef CompressionProfile
   #define CompressionProfile "ultra64-solid"

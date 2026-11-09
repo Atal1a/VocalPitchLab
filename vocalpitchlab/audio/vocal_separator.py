@@ -6,6 +6,9 @@ import numpy as np,soundfile as sf
 from vocalpitchlab.runtime.paths import APP_ROOT, MODEL_ROOT
 ROOT=APP_ROOT
 VERSION='mel-kim-87201f4d-adaptive-overlap4-v2'
+VOCAL_MODEL = (MODEL_ROOT/'roformer', 'vocals_mel_band_roformer.ckpt', 'vocals_mel_band_roformer.yaml')
+HARMONY_MODEL = (MODEL_ROOT/'lead-separation', 'bs_roformer_karaoke_frazer_becruily.ckpt',
+                 'config_bs_roformer_karaoke_frazer_becruily.yaml')
 
 def prepare_decoded_mix(instance,path):
     """Pass our decoded float32 stereo audio through upstream validation."""
@@ -13,12 +16,13 @@ def prepare_decoded_mix(instance,path):
     instance.input_bit_depth=32;instance.input_subtype='FLOAT'
     return type(instance).prepare_mix(instance,audio)
 
-def available():
-    return all(p.is_file() for p in [MODEL_ROOT/'roformer/vocals_mel_band_roformer.ckpt',
-        MODEL_ROOT/'roformer/vocals_mel_band_roformer.yaml',ROOT/'vendor/separation-runtime/audio_separator/__init__.py'])
+def available(lead=False):
+    folder, checkpoint, config = HARMONY_MODEL if lead else VOCAL_MODEL
+    return all(p.is_file() for p in (folder/checkpoint, folder/config,
+        ROOT/'vendor/separation-runtime/audio_separator/__init__.py'))
 
 def separate(audio,sr,device,folder,lead=False):
-    if not available():raise FileNotFoundError('High quality vocal separation model/runtime missing')
+    if not available(lead):raise FileNotFoundError('Separation model/runtime missing')
     if sr!=44100:raise ValueError('RoFormer expects 44100 Hz decoded audio')
     import torch
     from vocalpitchlab.audio.audio_io import ffmpeg_path
@@ -48,8 +52,7 @@ def separate(audio,sr,device,folder,lead=False):
         model=None
         try:
             load_start=time.perf_counter()
-            model_dir=MODEL_ROOT/('lead-separation' if lead else 'roformer')
-            filename='bs_roformer_karaoke_frazer_becruily.ckpt' if lead else 'vocals_mel_band_roformer.ckpt'
+            model_dir, filename, _ = HARMONY_MODEL if lead else VOCAL_MODEL
             identity=tuple((str(p.resolve()),p.stat().st_size,p.stat().st_mtime_ns) for p in [model_dir/filename]+sorted(model_dir.glob('*.yaml')))
             key=(target,segment,precision,identity)
             model=separation_pool.take(key)

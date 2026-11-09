@@ -1,7 +1,7 @@
 pragma Singleton
 import QtQuick
 QtObject {
-    property bool dark: backend.state.dark
+    property bool dark: backend.dark
     readonly property bool motion: true
     property color background: dark ? "#18191c" : "#f5f5f7"
     property color panel: dark ? "#202226" : "#ffffff"

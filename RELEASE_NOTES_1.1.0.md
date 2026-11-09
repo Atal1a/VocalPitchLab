@@ -1,5 +1,7 @@
 # VocalPitchLab 1.1.0
 
+[English](RELEASE_NOTES_1.1.0.en.md)
+
 ## 性能改进
 
 - 提高整体分析速度，缩短等待时间。

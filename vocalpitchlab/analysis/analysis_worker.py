@@ -19,7 +19,6 @@ def run_jobs():
             request=json.loads(line)
             job_id=request['id']
             separation=request.get('separation','mel_bs')
-            if separation not in ['mel_bs','mel_roformer','htdemucs']:raise ValueError('Invalid separation')
             execute(request['source'],request['result_file'],True,separation)
         except (Exception,SystemExit):
             traceback.print_exc()

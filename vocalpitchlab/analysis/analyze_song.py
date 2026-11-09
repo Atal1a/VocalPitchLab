@@ -29,9 +29,10 @@ def execute(file,result_file=None,standalone=True,separation='mel_bs'):
 
 
 def main():
+    from vocalpitchlab.analysis.production_pipeline import SEPARATION_MODES
     p = argparse.ArgumentParser()
     p.add_argument('file'); p.add_argument('--result-file'); p.add_argument('--standalone', action='store_true')
-    p.add_argument('--separation', choices=['htdemucs', 'mel_roformer', 'mel_bs'], default='mel_bs')
+    p.add_argument('--separation', choices=SEPARATION_MODES, default='mel_bs')
     args = p.parse_args()
     execute(args.file,args.result_file,args.standalone,args.separation)
 
