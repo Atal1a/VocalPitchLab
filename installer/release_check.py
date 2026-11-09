@@ -11,7 +11,7 @@ def check(stage=None):
     checks = []
     def add(name, passed, detail):
         checks.append(dict(name=name, status='pass' if passed else 'blocked', detail=detail))
-    for name in ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'resources/pitch-config.json']:
+    for name in ['LICENSE', 'docs/THIRD_PARTY_NOTICES.md', 'resources/pitch-config.json']:
         add(name, (ROOT / name).is_file(), name)
     for model in json.loads((ROOT / 'resources/model-manifest.json').read_text(encoding='utf-8')):
         approved = model['redistribution'] == 'approved'

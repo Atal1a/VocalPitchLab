@@ -22,4 +22,4 @@ If the original mix or isolated vocals play without sound, enable **Playback com
 
 GPU acceleration requires an NVIDIA driver that supports your GPU. This release requires driver version 570.65 or later. No separate Python or CUDA Toolkit setup is required.
 
-The installers are unsigned. The project code is licensed under GPL-3.0-only. See [Third-party notices](THIRD_PARTY_NOTICES.md) for component and model licenses.
+The installers are unsigned. The project code is licensed under GPL-3.0-only. See [Third-party notices](../THIRD_PARTY_NOTICES.md) for component and model licenses.

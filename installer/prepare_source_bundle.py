@@ -28,19 +28,22 @@ def main():
     if OUT.exists():raise SystemExit('Source export already exists; preserve existing work')
     OUT.mkdir(parents=True)
     for name in SOURCE_FILES:copy(ROOT/name,OUT/name)
-    for name in ['assets','qml','installer','resources','docs','note-settings.json','LICENSE',
-                 'THIRD_PARTY_NOTICES.md','MODEL_LICENSE_REVIEW.md','MODEL_LICENSE_REVIEW.en.md',
-                 'INSTALLATION.md','INSTALLATION.en.md','CHANGELOG.md','CHANGELOG.en.md',
-                 'README.md','README.en.md','requirements.txt','.gitattributes']:
+    for name in ['assets','qml','installer','resources','note-settings.json','LICENSE',
+                 'README.md','requirements.txt','.gitattributes']:
         copy(ROOT/name,OUT/name)
+    docs=ROOT/'docs'
+    for path in sorted(docs.iterdir()):
+        if path.name!='releases':
+            copy(path,OUT/'docs'/path.name)
+    notes_dir=OUT/'docs/releases'
     current_version=tuple(map(int,args.version.split('.')))
-    for path in sorted(ROOT.glob('RELEASE_NOTES_*.md')):
+    for path in sorted((docs/'releases').glob('RELEASE_NOTES_*.md')):
         match=re.fullmatch(r'RELEASE_NOTES_(\d+\.\d+\.\d+)(?:\.en)?\.md',path.name)
         if match and tuple(map(int,match[1].split('.')))<=current_version:
-            copy(path,OUT/path.name)
+            copy(path,notes_dir/path.name)
     for suffix in ('.md','.en.md'):
         name=f'RELEASE_NOTES_{args.version}{suffix}'
-        if not (OUT/name).is_file():
+        if not (notes_dir/name).is_file():
             raise SystemExit(f'Missing release notes: {name}')
     # Older experimental tests rely on private audio and removed application modules.
     for pattern in ['test_*.py','package_*.py']:

@@ -12,7 +12,7 @@
 - `prepare_github_assets.py` 检查发布附件并生成安装说明。
 - `prepare_source_bundle.py` 导出源码包，仅包含维护中的单元测试和安装包测试，不包含歌曲、模型权重、用户数据和旧实验脚本。生成压缩包前检查本机路径；`--deny-file` 可追加本地隐私检查名单。
 
-构建脚本使用项目下的 `work/`、`build/` 和 `dist/` 目录。依赖缓存、模型及构建工具需另行准备；源码仓库不包含这些大型文件。模型来源与使用条件见 [第三方说明](../THIRD_PARTY_NOTICES.md) 和 [模型许可记录](../MODEL_LICENSE_REVIEW.md)。
+构建脚本使用项目下的 `work/`、`build/` 和 `dist/` 目录。依赖缓存、模型及构建工具需另行准备；源码仓库不包含这些大型文件。模型来源与使用条件见 [第三方说明](../docs/THIRD_PARTY_NOTICES.md) 和 [模型许可记录](../docs/MODEL_LICENSE_REVIEW.md)。
 
 GPU 运行环境固定为 PyTorch 2.7.1、torchaudio 2.7.1 的 CUDA 12.8 构建，配套版本记录在 `resources/reproducible/runtime.lock`。这组构建包含 RTX 50 系列需要的 `sm_120` 内核。`prepare_delivery.py` 会拒绝与锁定版本不一致的 GPU 依赖；更换运行库后需要重新组装完整包，或明确使用包含运行库的更新模式。
 

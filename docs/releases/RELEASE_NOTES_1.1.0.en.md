@@ -22,4 +22,4 @@ Download `setup.exe` and all `.bin` volumes for this version. Put them in one fo
 
 The installer includes Python, the models, and the CUDA runtime. No separate setup is required. GPU acceleration requires a compatible NVIDIA GPU and driver.
 
-The project code is licensed under GPL-3.0-only. Third-party components and models retain their respective licenses. See [Third-party notices](THIRD_PARTY_NOTICES.md).
+The project code is licensed under GPL-3.0-only. Third-party components and models retain their respective licenses. See [Third-party notices](../THIRD_PARTY_NOTICES.md).

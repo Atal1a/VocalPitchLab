@@ -17,14 +17,9 @@ bin/
 *.pyo
 *.pdb
 
-# Public root documents. Keep local experiments and review records out of Git.
+# Keep local notes and experiments in the root out of Git.
 /*.md
 !/README.md
-!/INSTALLATION.md
-!/CHANGELOG.md
-!/RELEASE_NOTES_*.md
-!/THIRD_PARTY_NOTICES.md
-!/MODEL_LICENSE_REVIEW.md
 /assets/BRAND.md
 
 # Publish maintained tests; older scripts depend on local songs and retired UIs.

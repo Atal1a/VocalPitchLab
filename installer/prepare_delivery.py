@@ -51,9 +51,9 @@ def main():
     reports.mkdir(parents=True, exist_ok=True)
     STAGE.mkdir(parents=True)
     for name in SOURCE_FILES: copy(ROOT/name, STAGE/name)
-    for name in [*RESOURCES, 'INSTALLATION.md', 'INSTALLATION.en.md',
-                 'CHANGELOG.md', 'CHANGELOG.en.md']:
-        copy(ROOT/name, STAGE/name)
+    for name in RESOURCES: copy(ROOT/name, STAGE/Path(name).name)
+    for name in ('INSTALLATION.md', 'INSTALLATION.en.md', 'CHANGELOG.md', 'CHANGELOG.en.md'):
+        copy(ROOT/'docs'/name, STAGE/name)
     copy(ROOT/'installer/launch.py', STAGE/'launch.py')
     for name in [*VENDOR, 'separation-runtime']: copy(CLEAN/'vendor'/name, STAGE/'vendor'/name)
     copy(CLEAN/'models', STAGE/'models')

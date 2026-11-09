@@ -12,7 +12,7 @@ Requirements: Windows x64, Python 3.12, Inno Setup, and the .NET Framework compi
 - `prepare_github_assets.py` validates release attachments and generates installation instructions.
 - `prepare_source_bundle.py` exports the source archive. It includes maintained unit and installer tests and excludes songs, model weights, user data, and old experimental scripts. The export is checked for local paths before archiving. Use `--deny-file` to add a local privacy checklist.
 
-Build scripts use the project's `work/`, `build/`, and `dist/` directories. Prepare the dependency cache, models, and build tools separately. The source repository excludes these large files. See the [third-party notices](../THIRD_PARTY_NOTICES.md) and [model license review](../MODEL_LICENSE_REVIEW.en.md) for sources and terms.
+Build scripts use the project's `work/`, `build/`, and `dist/` directories. Prepare the dependency cache, models, and build tools separately. The source repository excludes these large files. See the [third-party notices](../docs/THIRD_PARTY_NOTICES.md) and [model license review](../docs/MODEL_LICENSE_REVIEW.en.md) for sources and terms.
 
 The GPU environment uses the CUDA 12.8 builds of PyTorch 2.7.1 and torchaudio 2.7.1. See `resources/reproducible/runtime.lock` for the pinned versions. These builds include the `sm_120` kernels needed by RTX 50-series GPUs. `prepare_delivery.py` rejects GPU dependencies that do not match the locked versions. After changing the runtime, rebuild the full installer or explicitly build an update that includes the runtime.
 

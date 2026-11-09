@@ -19,4 +19,4 @@ This release also fixes several issues with batch imports and interface messages
 
 Use a full installer for Windows x64. For the split installer, put the setup executable and all accompanying `.bin` files in the same folder. For the single-file installer, run the setup executable directly.
 
-If you have the official 1.1.2 release, you can use the standalone update to reuse your installed runtime and models. You can also close the app and run a full installer in the original folder. Both methods preserve your song library, settings, and analysis results. See the [installation guide](INSTALLATION.en.md).
+If you have the official 1.1.2 release, you can use the standalone update to reuse your installed runtime and models. You can also close the app and run a full installer in the original folder. Both methods preserve your song library, settings, and analysis results. See the [installation guide](../INSTALLATION.en.md).
