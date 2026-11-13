@@ -8,8 +8,8 @@ LANGUAGES = ('zh-CN', 'en')
 ENGLISH = {
     '界面语言': 'Language',
     '导入歌曲': 'Import songs',
-    '音频 (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma *.aiff)':
-        'Audio files (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma *.aiff)',
+    '音频或视频 (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma *.aiff *.mp4 *.mov *.m4v)':
+        'Audio or video files (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma *.aiff *.mp4 *.mov *.m4v)',
     '＋ 导入歌曲': '+ Import songs',
     '歌曲库': 'Song library',
     '完成': 'Done',
@@ -37,7 +37,7 @@ ENGLISH = {
     '取消': 'Cancel',
     '重试': 'Retry',
     '拖入一首歌': 'Drop a song here',
-    '选择音频': 'Choose audio',
+    '选择音频或视频': 'Choose audio or video',
     '暂停': 'Pause',
     '播放': 'Play',
     '空格': 'Space',
@@ -128,7 +128,9 @@ ENGLISH = {
     '无法导出音轨，请检查音频和保存位置。': 'Unable to export the track. Check the audio files and save location.',
     '已保存此刻的试听备注。': 'Listening note saved at the current position.',
     '无法打开结果，请保留 index.json 引用的音频及分析文件。': 'Unable to open the result. Check the audio and analysis files listed in index.json.',
-    '请选择有效的音频文件。': 'Choose a supported audio file.',
+    '请选择支持的音频或视频文件。': 'Choose a supported audio or video file.',
+    '这个文件没有音轨，请换一个文件。': 'This file has no audio track. Choose another file.',
+    '这个文件包含多段音轨，将分析默认音轨。': 'This file has several audio tracks. The default track will be analyzed.',
     '无法读取音频文件，请检查权限或文件是否仍存在。': 'Unable to read the audio file. Check that it exists and that you have access.',
     '这首歌已在分析队列中。': 'This song is already in the analysis queue.',
     '这首歌已有分析结果，请在歌曲库中打开。': 'This song has already been analyzed. Open it from the library.',

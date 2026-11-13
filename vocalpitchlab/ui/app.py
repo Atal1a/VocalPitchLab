@@ -21,6 +21,8 @@ from PySide6.QtMultimedia import QMediaPlayer,QAudioOutput
 ROOT=APP_ROOT
 prepare()
 FORMATS={'.mp3','.wav','.flac','.m4a','.aac','.ogg','.wma','.aiff'}
+VIDEO_FORMATS={'.mp4','.mov','.m4v'}
+FORMATS|=VIDEO_FORMATS
 LABELS={'crepe_full':'CREPE 完整版','crepe_tiny':'CREPE 轻量版','rmvpe_vocals':'RMVPE','tuned_vocals':'调参候选'}
 COLORS={'crepe_full':'#0072b2','crepe_tiny':'#b45309','rmvpe_vocals':'#b01874','tuned_vocals':'#111827'}
 PITCH_MODES={'fusion':'tuned_vocals','crepe':'crepe_full','rmvpe':'rmvpe_vocals','tracked':'rmvpe_tracked','fcpe':'fcpe'}
@@ -788,7 +790,7 @@ class Controller(QObject):
     @Slot(str)
     def enqueue(self,url):
         path=local_path(url).resolve()
-        if not path.is_file() or path.suffix.lower() not in FORMATS:self.feedback('请选择有效的音频文件。');return
+        if not path.is_file() or path.suffix.lower() not in FORMATS:self.feedback('请选择支持的音频或视频文件。');return
         try:stat=path.stat();signature=[stat.st_size,stat.st_mtime_ns]
         except OSError:self.feedback('无法读取音频文件，请检查权限或文件是否仍存在。');return
         matching=lambda p:os.path.normcase(str(Path(p).resolve()))==os.path.normcase(str(path))
@@ -800,6 +802,11 @@ class Controller(QObject):
         for s in self.data['songs']:
             if s.get('source') and matching(s['source']) and not any(matching(j['source']) for j in self.data['jobs']):
                 self.feedback('这首歌已在歌曲库中。');return
+        if path.suffix.lower() in VIDEO_FORMATS:
+            from vocalpitchlab.audio.audio_io import audio_stream_count
+            tracks=audio_stream_count(path)
+            if tracks==0:self.feedback('这个文件没有音轨，请换一个文件。');return
+            if tracks and tracks>1:self.feedback('这个文件包含多段音轨，将分析默认音轨。')
         self.data['jobs'].append(dict(id=uuid.uuid4().hex,source=str(path),signature=signature,separation=self.default_separation,state='queued',progress=0,message='等待分析'))
         self.save();self.contentChanged.emit();self.start_next()
         if not self.active:self.changed.emit()
