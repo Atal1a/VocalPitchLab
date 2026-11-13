@@ -47,7 +47,7 @@ ApplicationWindow {
             selectedSongs = next; selectionAnchor = index
         } else backend.selectSong(index)
     }
-    FileDialog { id: audioDialog; title: qsTr("导入歌曲"); currentFolder: backend.inputUrl; fileMode: FileDialog.OpenFiles; nameFilters: [qsTr("音频 (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma *.aiff)")]; onAccepted: { for (let f of selectedFiles) backend.enqueue(f.toString()) } }
+    FileDialog { id: audioDialog; title: qsTr("导入歌曲"); currentFolder: backend.inputUrl; fileMode: FileDialog.OpenFiles; nameFilters: [qsTr("音频或视频 (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma *.aiff *.mp4 *.mov *.m4v)")]; onAccepted: { for (let f of selectedFiles) backend.enqueue(f.toString()) } }
     FileDialog {
         id: stemDialog; objectName: "stemDialog"
         title: qsTr("保存音轨"); fileMode: FileDialog.SaveFile
@@ -239,7 +239,7 @@ ApplicationWindow {
                 PitchView { objectName: "pitchView"; controller: backend; anchors.fill: parent; anchors.margins: 18; visible: s.loaded }
                 Column { visible: !s.loaded; anchors.centerIn: parent; spacing: 18
                     Text { text: qsTr("拖入一首歌"); font.pixelSize: 27; font.bold: true; color: Theme.text }
-                    AppButton { text: qsTr("选择音频"); primary: true; onClicked: audioDialog.open() }
+                    AppButton { text: qsTr("选择音频或视频"); primary: true; onClicked: audioDialog.open() }
                 }
             }
             Rectangle {

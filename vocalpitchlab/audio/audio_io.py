@@ -29,6 +29,23 @@ def ffmpeg_path():
         return found
     raise RuntimeError('FFmpeg not found. Add ffmpeg.exe to PATH.')
 
+def audio_stream_count(path):
+    """Count audio streams from the FFmpeg header dump; None when probing fails.
+
+    Only ffmpeg.exe is bundled, so there is no ffprobe to ask; and `-i` without an
+    output file always exits non-zero, so the stream list has to be read from stderr.
+    """
+    try:
+        result = subprocess.run([ffmpeg_path(), '-hide_banner', '-nostdin', '-i', str(path)],
+                                capture_output=True, text=True, encoding='utf-8',
+                                errors='replace', timeout=15)
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return None
+    if 'Input #0' not in result.stderr:
+        return None
+    return sum(1 for line in result.stderr.splitlines()
+               if line.lstrip().startswith('Stream #') and ': Audio:' in line)
+
 def decode(source, target, start, duration):
     cmd = [ffmpeg_path(), '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source), '-ss', str(start)]
     if duration > 0:
