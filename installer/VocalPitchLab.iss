@@ -4,6 +4,19 @@
 #ifndef AppVersion
   #define AppVersion "1.2.0"
 #endif
+#ifdef CpuPackage
+  #define RuntimeVariant "cpu"
+  #define RuntimeSuffix "-cpu"
+  #if !FileExists(AddBackslash(StageDir) + "runtime-variant.txt") || FileExists(AddBackslash(StageDir) + "runtime\Lib\site-packages\torch\lib\torch_cuda.dll")
+    #error CpuPackage requires a prepared CPU stage
+  #endif
+#else
+  #define RuntimeVariant "nvidia"
+  #define RuntimeSuffix ""
+  #if FileExists(AddBackslash(StageDir) + "runtime-variant.txt") && !FileExists(AddBackslash(StageDir) + "runtime\Lib\site-packages\torch\lib\torch_cuda.dll")
+    #error An NVIDIA stage requires the CUDA runtime
+  #endif
+#endif
 #ifndef CompressionProfile
   #define CompressionProfile "ultra64-solid"
 #endif
@@ -38,15 +51,15 @@ ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#PackageOutputDir}
 #else
 #ifdef GithubAssets
-OutputDir=..\dist\VocalPitchLab-{#AppVersion}-windows-x64
+OutputDir=..\dist\VocalPitchLab-{#AppVersion}-windows-x64{#RuntimeSuffix}
 #else
 OutputDir=..\dist
 #endif
 #endif
 #ifdef SingleFileOffline
-OutputBaseFilename=VocalPitchLab-{#AppVersion}-windows-x64-offline-setup
+OutputBaseFilename=VocalPitchLab-{#AppVersion}-windows-x64{#RuntimeSuffix}-offline-setup
 #else
-OutputBaseFilename=VocalPitchLab-{#AppVersion}-windows-x64-setup
+OutputBaseFilename=VocalPitchLab-{#AppVersion}-windows-x64{#RuntimeSuffix}-setup
 #endif
 Compression={#CompressionMethod}
 SolidCompression={#SolidMode}
@@ -119,6 +132,63 @@ end;
 function IsPackageValidation: Boolean;
 begin
   Result := ExpandConstant('{param:PACKAGEVALIDATION|0}') = '1';
+end;
+
+function HasTorchMetadata(const SitePackages, Pattern: String): Boolean;
+var Match: TFindRec;
+begin
+  Result := FindFirst(SitePackages + Pattern, Match);
+  if Result then FindClose(Match);
+end;
+
+function RuntimeMatches(const Folder: String): Boolean;
+var
+  Marker, Launcher, SitePackages, ExistingVariant: String;
+  Content: AnsiString;
+  MajorMinor, PatchBuild: Cardinal;
+  HasCPU, HasCUDA: Boolean;
+begin
+  Result := True;
+  Marker := AddBackslash(Folder) + 'runtime-variant.txt';
+  if FileExists(Marker) then begin
+    if not LoadStringFromFile(Marker, Content) then begin
+      Result := False;
+      Exit;
+    end;
+    ExistingVariant := Trim(Content);
+  end else begin
+    Launcher := AddBackslash(Folder) + 'VocalPitchLab.exe';
+    if not FileExists(Launcher) then Exit;
+    SitePackages := AddBackslash(Folder) + 'runtime\Lib\site-packages\';
+    HasCPU := HasTorchMetadata(SitePackages, 'torch-*+cpu.dist-info');
+    HasCUDA := FileExists(SitePackages + 'torch\lib\torch_cuda.dll') or
+      HasTorchMetadata(SitePackages, 'torch-*+cu*.dist-info');
+    ExistingVariant := '';
+    if HasCPU and not HasCUDA then ExistingVariant := 'cpu'
+    else if HasCUDA and not HasCPU then ExistingVariant := 'nvidia'
+    else if not HasCPU and not HasCUDA then begin
+      { Releases before 1.3 did not offer a CPU installer. }
+      if GetVersionNumbers(Launcher, MajorMinor, PatchBuild) and (MajorMinor < $00010003) then
+        ExistingVariant := 'nvidia';
+    end;
+  end;
+  Result := CompareText(ExistingVariant, '{#RuntimeVariant}') = 0;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  RegisteredDir: String;
+  Matches: Boolean;
+begin
+  Matches := RuntimeMatches(WizardDirValue);
+  if not IsPackageValidation and RegQueryStringValue(HKCU,
+      'Software\Microsoft\Windows\CurrentVersion\Uninstall\VocalPitchLab.LocalPreview_is1',
+      'Inno Setup: App Path', RegisteredDir) then
+    Matches := Matches and RuntimeMatches(RegisteredDir);
+  if not Matches then
+    Result := 'CPU 与 NVIDIA 版本不能直接覆盖。请先卸载现有版本，再运行此安装程序。歌曲库和分析结果会保留。'
+  else
+    Result := PrepareVCRuntime;
 end;
 
 procedure CleanBytecode(const Folder: String);

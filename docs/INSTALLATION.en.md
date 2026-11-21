@@ -2,12 +2,12 @@
 
 [简体中文](INSTALLATION.md)
 
-For the VocalPitchLab 1.2.0 full offline installers for Windows x64.
+For VocalPitchLab 1.3.0 on Windows x64. See the [1.3.0 installation guide](releases/INSTALLATION_1.3.0.en.md) for installer, volume, and update filenames.
 
 ## Install
 
-1. For the split installer, use `VocalPitchLab-1.2.0-windows-x64-setup.exe` and all accompanying `.bin` volumes. For the single-file installer, use `VocalPitchLab-1.2.0-windows-x64-offline-setup.exe`.
-2. For the split installer, put all files from the same version in one folder and keep their original names. Run the corresponding `.exe` and follow the wizard. The volumes do not need to be extracted separately. No separate Python or CUDA Toolkit setup is required.
+1. The CPU edition uses one installer. The NVIDIA edition requires the installer and all its volumes.
+2. Keep the NVIDIA installer and volumes in one folder with their original names. Run the `.exe` for your edition and follow the wizard.
 3. If a required Microsoft runtime is missing, the installer adds it offline. Windows may request administrator permission. This step is skipped if a sufficiently recent runtime is already installed.
 4. If the runtime needs a restart, the wizard prompts after installation finishes. You can restart immediately or later. Start VocalPitchLab after restarting. There is no need to rerun the installer.
 
@@ -17,9 +17,9 @@ A compatible NVIDIA GPU and driver can speed up analysis. The GPU runtime in thi
 
 ## Upgrade
 
-If you have the official 1.1.2 release installed, close VocalPitchLab and run `VocalPitchLab-1.2.0-windows-x64-update-from-1.1.2.exe`. The update reuses your existing runtime and models. If the wizard cannot detect your installation, select the original folder manually. Use a full installer for other versions, or if files in your existing installation are missing or modified.
+If you have the official 1.2.0 release installed, close VocalPitchLab and run the single-file update to upgrade to the 1.3.0 NVIDIA edition. The update reuses your existing runtime and models. If the wizard cannot detect your installation, select the original folder.
 
-You can use either full installer to upgrade without uninstalling first. Close VocalPitchLab and run the installer. If you use the same Windows account and the previous installation record is valid, the wizard reuses the original installation folder. If the folder was moved or the wizard cannot detect it, select the existing folder manually.
+If the update is unavailable for your installation, run the full installer for your edition in the existing folder. To switch between CPU and NVIDIA editions, uninstall the current edition first. The wizard reuses the original installation folder when the same Windows account has a valid installation record.
 
 The full installer replaces the app and runtime while preserving the song library, settings, and analysis results. It also supports first-time installation and repairs missing or modified installation files.
 

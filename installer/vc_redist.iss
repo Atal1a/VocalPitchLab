@@ -35,7 +35,7 @@ begin
   Result := HasVCRuntimeInView(HKLM64) or HasVCRuntimeInView(HKLM32);
 end;
 
-function PrepareToInstall(var NeedsRestart: Boolean): String;
+function PrepareVCRuntime: String;
 var
   RuntimeFile, LogDir, LogFile: String;
   ExitCode: Integer;

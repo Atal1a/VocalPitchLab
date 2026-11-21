@@ -11,6 +11,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 from PySide6.QtCore import QEvent, QMimeData, QObject, QPoint, QPointF, Qt, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QGuiApplication
 from PySide6.QtTest import QTest
+import numpy as np
+import soundfile as sf
 
 from vocalpitchlab.ui.app import Controller, create_engine
 
@@ -98,11 +100,17 @@ class AnalysisQueueUITests(unittest.TestCase):
                     row_status = row_content.findChild(QObject, 'jobRowStatus')
                     self.assertEqual(row_status.property('text'), '分离和声')
 
+                    original = root/'decoded.wav';sf.write(original,np.zeros(44100,dtype='float32'),44100)
+                    curve = root/'curve.csv';curve.write_text('time_seconds,midi_float,periodicity_or_probability\n0,57,1\n')
+                    notes = root/'notes.json';notes.write_text('{"notes": []}')
                     controller.result_file = root / 'result.json'
                     controller.result_file.write_text(json.dumps(dict(song=dict(name=sources[0].stem,
-                        duration=1, audio={}, curves={}, main_notes=str(sources[0])))), encoding='utf-8')
-                    controller.finished(0, job_done=True)
+                        duration=1, audio=dict(original=str(original),vocals=str(original)),
+                        curves=dict(crepe_full=str(curve)), main_notes=str(notes),algorithm=dict(separation='original')))), encoding='utf-8')
+                    with patch.object(controller,'queue_presentation'), patch.object(controller,'load_audio'):
+                        controller.finished(0, job_done=True)
                     self.app.processEvents()
+                    self.assertEqual(first['state'],'complete')
                     self.assertTrue(card.isVisible())
                     self.assertEqual(title.property('text'), sources[1].name)
                     self.assertEqual(status.property('text'), '等待分析')
@@ -118,3 +126,59 @@ class AnalysisQueueUITests(unittest.TestCase):
                 window.close()
                 engine.deleteLater()
                 self.app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+    def test_only_one_batch_write_and_one_repair_for_damaged_recording(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);source=root/'take.wav';decoded=root/'original.wav'
+            for path in (source,decoded):sf.write(path,np.zeros(44100,dtype='float32'),44100)
+            from vocalpitchlab.analysis.analysis_cache import digest_file
+            from vocalpitchlab.analysis.recording import source_signature
+            curve=root/'curve.csv';curve.write_text('time_seconds,midi_float,periodicity_or_probability\n0,60,1\n')
+            notes=root/'notes.json';notes.write_text('{')
+            song=dict(song_id='existing',name='take',duration=1,source=str(source),source_sha256=digest_file(source),
+                      source_signature=source_signature(source),audio=dict(original=str(decoded),vocals=str(decoded)),
+                      curves=dict(crepe_full=str(curve)),main_notes=str(notes),algorithm=dict(separation='original'))
+            (root/'index.json').write_text(json.dumps(dict(songs=[song])))
+            b=Controller(root,bootstrap=False)
+            self.assertIsNone(b.song)
+            addition=root/'new.wav';addition.touch()
+            try:
+                with patch.object(b,'start_next') as start,patch.object(b,'save',wraps=b.save) as save:
+                    b.enqueueBatch([str(source),str(source),str(addition),str(root/'wrong.txt')])
+                    save.assert_called_once();start.assert_called_once()
+                repair,new=b.data['jobs']
+                self.assertEqual(repair['target_id'],'existing')
+                self.assertEqual(repair['separation'],'original')
+                self.assertEqual(new['source'],str(addition))
+                self.assertEqual(b.data['songs'],[song])
+            finally:
+                b.shutdown()
+
+    def test_only_the_matching_job_can_publish_ready_tracks(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            original=root/'take.wav';vocals=root/'vocals.wav'
+            for path in (original,vocals):sf.write(path,np.zeros(44100,dtype='float32'),44100)
+            b=Controller(root,bootstrap=False)
+            engine=create_engine(b);window=engine.rootObjects()[0]
+            job=dict(id='current',source=str(original),state='running',separation='mel_roformer')
+            b.active=b.display_job=job;b.data['jobs']=[job]
+            b.log_file=root/'worker.log';b.process=Mock()
+            descriptor=dict(name='take',source=str(original),audio=dict(original=str(original),vocals=str(vocals)),
+                            algorithm=dict(separation='mel_roformer'))
+            def ready(key):
+                return ('VPL_STEMS_READY '+json.dumps(dict(id=key,stems=descriptor))+'\n').encode()
+            export=window.findChild(QObject,'analysisJobExport')
+            try:
+                b.process.readAllStandardOutput.side_effect=(ready('unrelated'),ready('current'))
+                b.changed.emit();b.read_progress()
+                self.assertFalse(export.isVisible())
+                b.read_progress()
+                self.assertTrue(export.isVisible())
+                self.assertEqual(job['state'],'running')
+                self.assertIsNone(b.song)
+                self.assertEqual(b.jobStemExportOptions('current'),['vocals','instrumental'])
+            finally:
+                b.process=None;b.active=None
+                b.shutdown();window.close();engine.deleteLater()
+                self.app.sendPostedEvents(None,QEvent.Type.DeferredDelete)

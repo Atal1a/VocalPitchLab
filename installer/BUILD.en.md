@@ -18,13 +18,19 @@ The GPU environment uses the CUDA 12.8 builds of PyTorch 2.7.1 and torchaudio 2.
 
 For a new cache, pass the same directory to `lock_artifacts.py --artifacts <cache-dir>` and `rebuild_environment.py --artifacts <cache-dir>`. Keep only the target version of each package. The `wheels/` and `vendor-wheels/` directories correspond to the two lockfiles.
 
+The CPU environment uses the Windows x64 CPU wheels for PyTorch and torchaudio 2.7.1. Their URLs and hashes are in `resources/reproducible/cpu-artifacts.json`. The other dependencies use the shared cache. Rebuild with `--runtime cpu --cpu-wheels <CPU wheel directory>`. Pass `--runtime cpu` and the matching `--dependencies` to `prepare_delivery.py` and use separate stage directories for the two environments. Pass `/DCpuPackage /DSingleFileOffline` to Inno Setup for the single-file CPU installer.
+
 After assembly, use the candidate's bundled Python to check versions, GPU execution, audio operations, and the `sm_120` kernels:
 
 ```powershell
 <candidate-dir>/runtime/python.exe -I -B tests/package_gpu_check.py <candidate-dir> --output <test-output-dir>/gpu.json
 ```
 
-GitHub release attachments include the full installer, its volumes, the source archive, installation instructions, and release notes. The single-file full installer is distributed through Quark Drive.
+The 1.3.0 GitHub attachments include the single-file CPU installer, the NVIDIA installer and volumes, the single-file update from 1.2.0, and the source archive. Keep the attachments for one release in the same directory or in its subdirectories. Run this command to validate the attachments and generate the manifest and installation instructions.
+
+```powershell
+python installer/prepare_github_assets.py --directory dist/VocalPitchLab-1.3.0
+```
 
 Standard installer builds use grouped solid Ultra64 compression:
 
@@ -69,7 +75,7 @@ Use `--deny-file` to supply a local privacy checklist. After the test installati
 python installer/build_update.py --baseline <released-app-dir> --stage <new-app-dir> --from-version 1.1.0 --version 1.1.1 --output work/update-1.1.1 --removals <assembly-report-dir>/optional-trim.json
 ```
 
-Use a verified, released full installation as the baseline. The builder compares SHA-256 hashes file by file. By default it includes only changed application files and resources. To replace dependencies inside the Python runtime, pass `--include-runtime` explicitly. This mode uses split volumes, keeps the installed models, and reserves backup space for files to be replaced or removed. Use a full installer to replace models, third-party separation code, or FFmpeg.
+Use a verified, released full installation as the baseline. The builder compares SHA-256 hashes file by file. By default it includes only changed application files and resources. To replace dependencies inside the Python runtime, pass `--include-runtime` explicitly. The update keeps the installed models and reserves backup space for files to be replaced or removed. Large runtime updates use split volumes. Use a full installer to replace models, third-party separation code, or FFmpeg.
 
 Example of an update that includes the runtime:
 

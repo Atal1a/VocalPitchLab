@@ -63,7 +63,7 @@ def main():
     p.add_argument('--from-version', required=True)
     p.add_argument('--removals', type=Path, help='Audited optional dependency removal report')
     p.add_argument('--version', required=True)
-    p.add_argument('--include-runtime', action='store_true', help='Include changed runtime files with transactional backup and split volumes')
+    p.add_argument('--include-runtime', action='store_true', help='Include changed runtime files with transactional backup')
     p.add_argument('--compiler', type=Path, default=ROOT/'work/installer-tools/inno/ISCC.exe')
     a = p.parse_args()
     for v in (a.from_version, a.version):
@@ -103,7 +103,9 @@ def main():
     command = [str(a.compiler), '/Q', f'/DStageDir={stage}', f'/DUpdateDir={out}',
         f'/DAppVersion={a.version}', f'/DFromVersion={a.from_version}',
         f'/DInstalledSize={sum(r["bytes"] for r in new)}', f'/DBackupSize={backup_size}']
-    if a.include_runtime: command.append('/DRuntimeUpdate')
+    # Keep small updates single-file when the runtime changes only in wheel metadata.
+    if a.include_runtime and sum(r['bytes'] for r in changes) >= 1_500_000_000:
+        command.append('/DRuntimeUpdate')
     command.append(str(ROOT/'installer/Update.iss'))
     metrics = measure(command, out/'build.log')
     exe = next(out.glob('*.exe'))

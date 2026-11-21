@@ -16,6 +16,8 @@ def main():
     p.add_argument('--old-stage',type=Path,required=True)
     p.add_argument('--stage',type=Path,required=True)
     p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--from-version',default='1.1.0')
+    p.add_argument('--version',default='1.1.1')
     a=p.parse_args();out=a.output.resolve()
     if out.exists():raise SystemExit('Choose a fresh directory')
     out.mkdir(parents=True);old=out/'old';new=out/'new';old.mkdir();new.mkdir()
@@ -37,7 +39,7 @@ def main():
     base.write_text(f'''[Setup]
 AppId={identity}
 AppName={title}
-AppVersion=1.1.0
+AppVersion={a.from_version}
 DefaultDirName={target}
 DefaultGroupName={group}
 PrivilegesRequired=lowest
@@ -52,7 +54,7 @@ Name: "{{group}}\\{title}"; Filename: "{{app}}\\VocalPitchLab.exe"; IconFilename
 ''',encoding='utf-8-sig')
     subprocess.run([str(compiler),'/Q',str(base)],check=True)
     subprocess.run([sys.executable,'-B',str(ROOT/'installer/build_update.py'),'--baseline',str(old),
-        '--stage',str(new),'--output',str(out/'update'),'--from-version','1.1.0','--version','1.1.1'],check=True)
+        '--stage',str(new),'--output',str(out/'update'),'--from-version',a.from_version,'--version',a.version],check=True)
     script=(ROOT/'installer/Update.iss').read_text(encoding='utf-8')
     script=script.replace('#define AppIdentity "VocalPitchLab.LocalPreview"','#define AppIdentity "'+identity+'"')
     script=script.replace('AppName=VocalPitchLab\n','AppName='+title+'\n')
@@ -61,29 +63,32 @@ Name: "{{group}}\\{title}"; Filename: "{{app}}\\VocalPitchLab.exe"; IconFilename
     script=script.replace('LicenseFile=..\\LICENSE','LicenseFile='+str(ROOT/'LICENSE'))
     script=script.replace('#include "update_guard.iss"','#include "'+str(ROOT/'installer/update_guard.iss')+'"')
     update_script=out/'update.iss';update_script.write_text(script,encoding='utf-8-sig')
-    subprocess.run([str(compiler),'/Q',f'/DUpdateDir={out/"update"}','/DAppVersion=1.1.1','/DFromVersion=1.1.0',str(update_script)],check=True)
+    defines=[f'/DUpdateDir={out/"update"}',f'/DAppVersion={a.version}',f'/DFromVersion={a.from_version}']
+    subprocess.run([str(compiler),'/Q',*defines,str(update_script)],check=True)
     (out/'failure').mkdir()
-    subprocess.run([str(compiler),'/Q',f'/DUpdateDir={out/"update"}','/DAppVersion=1.1.1','/DFromVersion=1.1.0',
-        '/DUpdateTestFailure',f'/O{out/"failure"}',str(update_script)],check=True)
+    subprocess.run([str(compiler),'/Q',*defines,'/DUpdateTestFailure',f'/O{out/"failure"}',str(update_script)],check=True)
     common=['/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',f'/DIR={target}',f'/GROUP={group}']
     sentinel=out/'user-data.json';sentinel.write_text('{"preserve":true}')
     installed=False
     try:
         subprocess.run([str(out/'baseline-setup.exe'),*common,f'/LOG={out/"install.log"}'],check=True);installed=True
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,keyname) as key:
-            assert winreg.QueryValueEx(key,'DisplayVersion')[0]=='1.1.0'
+            assert winreg.QueryValueEx(key,'DisplayVersion')[0]==a.from_version
+            previous_name=winreg.QueryValueEx(key,'DisplayName')[0]
         failure=subprocess.run([str(next((out/'failure').glob('*.exe'))),*common,f'/LOG={out/"failure.log"}'],timeout=180)
         assert failure.returncode==8,failure.returncode
         verify(target,manifest(old))
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER,keyname) as key:
-            assert winreg.QueryValueEx(key,'DisplayVersion')[0]=='1.1.0'
+            assert winreg.QueryValueEx(key,'DisplayVersion')[0]==a.from_version
+            assert winreg.QueryValueEx(key,'DisplayName')[0]==previous_name
         print('PASS registered failure rollback',flush=True)
         update=next((out/'update').glob('*.exe'))
         for name in ('update','repeat'):
             subprocess.run([str(update),*common,f'/LOG={out/(name+".log")}'],check=True,timeout=180)
             verify(target,manifest(new))
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER,keyname) as key:
-                assert winreg.QueryValueEx(key,'DisplayVersion')[0]=='1.1.1'
+                assert winreg.QueryValueEx(key,'DisplayVersion')[0]==a.version
+                assert winreg.QueryValueEx(key,'DisplayName')[0]==f'{title} {a.version}'
             assert len(list(target.glob('unins*.exe')))==1
             print('PASS registered '+name,flush=True)
         assert sentinel.read_text()=='{"preserve":true}'
@@ -98,7 +103,7 @@ Name: "{{group}}\\{title}"; Filename: "{{app}}\\VocalPitchLab.exe"; IconFilename
         raise AssertionError('QA registration still exists')
     except FileNotFoundError:pass
     (out/'result.json').write_text(json.dumps(dict(registered_update=True,registered_repeat=True,failed_update_restores_version=True,
-        merged_uninstall_log=True,uninstall_removed_original_and_updated_files=True,user_data_preserved=True,
+        failed_update_restores_name=True,merged_uninstall_log=True,uninstall_removed_original_and_updated_files=True,user_data_preserved=True,
         scope='Small fixture payload with QA-only installation identity'),indent=2))
     print('PASS uninstall after update',flush=True)
 

@@ -254,10 +254,12 @@ class FakePlayer:
     def __init__(self):
         self.state = QMediaPlayer.PlaybackState.StoppedState
         self.ms = 0
+        self.length = 120000
 
     def playbackState(self): return self.state
     def mediaStatus(self): return QMediaPlayer.MediaStatus.BufferedMedia
     def position(self): return self.ms
+    def duration(self): return self.length
     def setPosition(self, value): self.ms = value
     def play(self): self.state = QMediaPlayer.PlaybackState.PlayingState
     def pause(self): self.state = QMediaPlayer.PlaybackState.PausedState
@@ -274,7 +276,7 @@ class PlaybackNotificationTests(unittest.TestCase):
         self.controller = Controller(self.folder.name, bootstrap=False)
         self.controller.player = FakePlayer()
         self.controller.vocal_player = FakePlayer()
-        self.controller.song = {'name': 'Test', 'duration': 120}
+        self.controller.song = {'name': 'Test', 'duration': 120, 'song_id': 'playback-test'}
         self.frames = []
         self.changes = []
         self.controller.frameChanged.connect(lambda: self.frames.append(self.controller.t))
@@ -341,6 +343,21 @@ class PlaybackNotificationTests(unittest.TestCase):
         self.assertEqual(b.t, 2.)
         self.assertEqual(b.player.position(), 2000)
         self.assertEqual(b.vocal_player.position(), 2000)
+
+    def test_rounded_end_of_media_restarts_or_respects_pause(self):
+        self.play()
+        b=self.controller;b.song['duration']=176416/44100;b.player.length=4000
+        b.setLoopRange(2.9,b.song['duration']);b.setLoop(True)
+        b.position(4000)
+        b.player.stop();b.playback_changed(b.player.playbackState())
+        b.media(QMediaPlayer.MediaStatus.EndOfMedia)
+        QTest.qWait(20)
+        self.assertEqual(b.player.position(),2900)
+        self.assertTrue(b.state_playing())
+        b.media(QMediaPlayer.MediaStatus.EndOfMedia)
+        b.togglePlay()
+        QTest.qWait(20)
+        self.assertFalse(b.state_playing())
 
     def test_texture_layers_leave_chart_pointer_interactions_available(self):
         b = self.controller

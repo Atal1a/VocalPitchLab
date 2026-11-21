@@ -2,6 +2,13 @@
 
 [简体中文](CHANGELOG.md)
 
+## 1.3.0
+
+- Export tracks as soon as separation finishes, or choose **Tracks only** and run full analysis later.
+- Batch queuing and reopening songs are faster, with less disk I/O when saving playback position.
+- Fixed loops stopping at the end of a song and improved edition detection and recovery after a failed update.
+- Added a CPU offline installer and a single-file update from 1.2.0 to the NVIDIA edition.
+
 ## 1.2.0
 
 - Added an English interface that can be enabled immediately in Settings.

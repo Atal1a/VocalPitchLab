@@ -17,8 +17,13 @@ ApplicationWindow {
     property bool managing: false
     property var selectedSongs: []
     property int selectionAnchor: -1
+    onManagingChanged: if (!managing) clearSongSelection()
     property bool loopEditor: false
     property var stemTracks: []
+    readonly property var stemLabels: ({
+        "vocals": qsTr("人声"), "lead-vocals": qsTr("主唱"), "instrumental": qsTr("伴奏"),
+        "backing-vocals": qsTr("和声"), "backing-mix": qsTr("和声与伴奏")
+    })
     property real loopViewStart: 0
     property real loopViewEnd: 20
     property bool loopOverview: false
@@ -34,11 +39,15 @@ ApplicationWindow {
         loopViewEnd = Math.min(s.duration, s.loopB + 2)
         loopRange.setValues(s.loopA, s.loopB)
     }
+    function clearSongSelection() {
+        selectedSongs = []
+        selectionAnchor = -1
+    }
     function chooseSong(index, modifiers) {
         if (managing || (modifiers & Qt.ControlModifier) || (modifiers & Qt.ShiftModifier)) {
             managing = true
             let next = selectedSongs.slice()
-            if ((modifiers & Qt.ShiftModifier) && selectionAnchor >= 0) {
+            if ((modifiers & Qt.ShiftModifier) && selectionAnchor >= 0 && selectionAnchor < backend.songs.length) {
                 for (let i = Math.min(index,selectionAnchor); i <= Math.max(index,selectionAnchor); i++) if (next.indexOf(i) < 0) next.push(i)
             } else {
                 let p = next.indexOf(index)
@@ -47,7 +56,14 @@ ApplicationWindow {
             selectedSongs = next; selectionAnchor = index
         } else backend.selectSong(index)
     }
-    FileDialog { id: audioDialog; title: qsTr("导入歌曲"); currentFolder: backend.inputUrl; fileMode: FileDialog.OpenFiles; nameFilters: [qsTr("音频 (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma *.aiff)")]; onAccepted: { for (let f of selectedFiles) backend.enqueue(f.toString()) } }
+    FileDialog {
+        id: audioDialog
+        property bool stemsOnly: false
+        title: stemsOnly ? qsTr("仅导出音轨") : qsTr("导入歌曲")
+        currentFolder: backend.inputUrl; fileMode: FileDialog.OpenFiles
+        nameFilters: [qsTr("音频 (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma *.aiff)")]
+        onAccepted: backend.enqueueBatch(selectedFiles.map(file => file.toString()), stemsOnly)
+    }
     FileDialog {
         id: stemDialog; objectName: "stemDialog"
         title: qsTr("保存音轨"); fileMode: FileDialog.SaveFile
@@ -55,12 +71,43 @@ ApplicationWindow {
         onAccepted: backend.exportStem(selectedFile)
         onRejected: backend.discardStemExport()
     }
-    function saveStem(track) {
+    function saveStem(track, jobId = "") {
         if (stemDialog.visible) return
-        const file = backend.prepareStemExport(track)
+        const file = jobId ? backend.prepareJobStemExport(jobId, track) : backend.prepareStemExport(track)
         if (file.toString().length) {
             stemDialog.selectedFile = file
             stemDialog.open()
+        }
+    }
+    function showJobStems(jobId, button) {
+        const tracks = backend.jobStemExportOptions(jobId)
+        if (!tracks.length) return
+        const point = button.mapToItem(win.contentItem, 0, button.height)
+        jobStemMenu.jobId = jobId
+        jobStemMenu.tracks = tracks
+        jobStemMenu.x = Math.min(point.x, win.width - jobStemMenu.width - 8)
+        jobStemMenu.y = Math.min(point.y, win.height - jobStemMenu.height - 8)
+        jobStemMenu.open()
+    }
+    Popup {
+        id: jobStemMenu; objectName: "jobStemMenu"; parent: win.contentItem
+        property string jobId: ""
+        property var tracks: []
+        padding: 6; width: 146
+        background: Rectangle { radius: 12; color: Theme.panel; border.color: Theme.line }
+        contentItem: ColumnLayout {
+            Repeater {
+                model: jobStemMenu.tracks
+                AppButton {
+                    required property string modelData
+                    objectName: "jobExport-" + modelData
+                    Layout.fillWidth: true; text: stemLabels[modelData]
+                    onClicked: {
+                        jobStemMenu.close()
+                        Qt.callLater(win.saveStem, modelData, jobStemMenu.jobId)
+                    }
+                }
+            }
         }
     }
     Item {
@@ -69,7 +116,7 @@ ApplicationWindow {
         Rectangle { x: -180; y: -170; width: 520; height: 630; radius: 260; color: Theme.dark ? "#1c3553" : "#dfebfb"; opacity: .24 }
         Rectangle { x: -160; y: win.height-400; width: 420; height: 450; radius: 210; color: Theme.dark ? "#28233f" : "#eee5f6"; opacity: .18 }
     }
-    DropArea { anchors.fill: parent; onDropped: function(drop) { if (drop.hasUrls) { for (let u of drop.urls) backend.enqueue(u.toString()); drop.acceptProposedAction() } } }
+    DropArea { anchors.fill: parent; onDropped: function(drop) { if (drop.hasUrls) { backend.enqueueBatch(drop.urls.map(url => url.toString())); drop.acceptProposedAction() } } }
     RowLayout {
         anchors.fill: parent; spacing: 0
         Item {
@@ -95,17 +142,21 @@ ApplicationWindow {
                 anchors.fill: parent; anchors.margins: 18; spacing: 14
                 RowLayout { Layout.topMargin: 16; Layout.bottomMargin: 15; spacing: 9
                     Image { objectName: "brandLogo"; property bool ready: status === Image.Ready; source: "../assets/vocalpitch-logo.svg"; Layout.preferredWidth: 34; Layout.preferredHeight: 34; sourceSize.width: 102; sourceSize.height: 102 }
-                    Text { text: "VocalPitchLab"; color: Theme.text; font.pixelSize: 18; font.bold: true }
+                    Text { text: "VocalPitchLab"; color: Theme.text; font.pixelSize: 18; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
                 }
-                AppButton { objectName: "importButton"; text: qsTr("＋ 导入歌曲"); primary: true; Layout.fillWidth: true; onClicked: audioDialog.open() }
+                ColumnLayout {
+                    Layout.fillWidth: true; spacing: 6
+                    AppButton { objectName: "importButton"; text: qsTr("＋ 导入歌曲"); primary: true; Layout.fillWidth: true; onClicked: { audioDialog.stemsOnly = false; audioDialog.open() } }
+                    AppButton { objectName: "importStemsButton"; text: qsTr("仅导出音轨"); Layout.fillWidth: true; implicitHeight: 28; enabled: s.canImportStems; onClicked: { audioDialog.stemsOnly = true; audioDialog.open() } }
+                }
                 RowLayout {
                     Layout.topMargin: 14
                     Text { text: qsTr("歌曲库"); color: Theme.muted; font.pixelSize: 12; Layout.fillWidth: true }
-                    AppButton { objectName: "manageButton"; text: managing ? qsTr("完成") : qsTr("批量管理"); onClicked: { managing = !managing; selectedSongs = [] } }
+                    AppButton { objectName: "manageButton"; text: managing ? qsTr("完成") : qsTr("批量管理"); onClicked: managing = !managing }
                 }
                 RowLayout { visible: managing
                     AppButton { text: qsTr("全选"); onClicked: { let a=[]; for(let i=0;i<backend.songs.length;i++) a.push(i); selectedSongs=a } }
-                    AppButton { objectName: "deleteButton"; text: qsTr("移除 %1").arg(selectedSongs.length); enabled: selectedSongs.length > 0; tip: qsTr("只移出歌曲库，保留原文件"); onClicked: { backend.deleteSongs(selectedSongs); selectedSongs=[] } }
+                    AppButton { objectName: "deleteButton"; text: qsTr("移除 %1").arg(selectedSongs.length); enabled: selectedSongs.length > 0; tip: qsTr("只移出歌曲库，保留原文件"); onClicked: backend.deleteSongs(selectedSongs) }
                 }
                 Item {
                     id: songListFrame; Layout.fillWidth: true; Layout.fillHeight: true
@@ -158,11 +209,12 @@ ApplicationWindow {
                                     elide: Text.ElideRight; color: Theme.muted; font.pixelSize: 10; Layout.fillWidth: true
                                 }
                             }
+                            AppButton { id: rowExport; objectName: "exportJob_" + jobRow.modelData.id; visible: jobRow.modelData.canExport; enabled: !s.exportingStem; text: qsTr("导出"); onClicked: win.showJobStems(jobRow.modelData.id, rowExport) }
                             AppButton { objectName: "removeJob_" + modelData.id; text: qsTr("删除"); tip: modelData.state === "running" ? qsTr("取消分析并删除任务") : qsTr("删除任务记录"); onClicked: backend.removeJob(modelData.id) }
                         }
                     }
                 }
-                AppButton { visible: managing && s.canUndo; text: qsTr("撤销移除"); Layout.fillWidth: true; onClicked: { backend.undoDelete(); selectedSongs=[] } }
+                AppButton { objectName: "undoDeleteButton"; visible: managing && s.canUndo; text: qsTr("撤销移除"); Layout.fillWidth: true; onClicked: { backend.undoDelete(); clearSongSelection() } }
                 AppButton { objectName: "settingsButton"; text: qsTr("设置"); Layout.fillWidth: true; onClicked: settingsPopup.open() }
             }
         }
@@ -206,12 +258,12 @@ ApplicationWindow {
                 }
             }
             Rectangle {
-                objectName: "analysisCard"; visible: s.running || s.jobQueued || s.canRetry; Layout.fillWidth: true; implicitHeight: 92; color: Theme.panel; radius: 16; border.color: Theme.line; border.width: .6
+                objectName: "analysisCard"; visible: s.running || s.jobQueued || s.canRetry || s.jobStemsOnly; Layout.fillWidth: true; implicitHeight: 92; color: Theme.panel; radius: 16; border.color: Theme.line; border.width: .6
                 RowLayout { anchors.fill: parent; anchors.margins: 16; spacing: 18
                     ColumnLayout { Layout.fillWidth: true; spacing: 10
                         RowLayout { Layout.fillWidth: true
                             Text { objectName: "analysisJobName"; text: s.jobName; font.pixelSize: 13; font.weight: Font.DemiBold; color: Theme.text; Layout.fillWidth: true; elide: Text.ElideRight }
-                            Text { text: s.running ? Math.round(s.jobProgress) + "%" : s.jobQueued ? qsTr("排队中") : qsTr("待重试"); font.pixelSize: 12; color: Theme.muted }
+                            Text { text: s.running ? Math.round(s.jobProgress) + "%" : s.jobStemsOnly ? "" : s.jobQueued ? qsTr("排队中") : qsTr("待重试"); font.pixelSize: 12; color: Theme.muted }
                         }
                         Rectangle { Layout.fillWidth: true; implicitHeight: 5; radius: 2.5; color: Theme.control
                             Rectangle { objectName: "analysisProgressFill"; height: parent.height; width: parent.width * Math.max(0, Math.min(1, s.jobProgress/100)); radius: 2.5; color: Theme.accent
@@ -224,6 +276,8 @@ ApplicationWindow {
                             ToolTip.delay: 400
                         }
                     }
+                    AppButton { id: jobExport; objectName: "analysisJobExport"; visible: s.jobStemsReady; enabled: !s.exportingStem; text: qsTr("导出音轨"); onClicked: win.showJobStems(s.jobId, jobExport) }
+                    AppButton { objectName: "analyzeReadyJob"; visible: s.jobStemsOnly; text: qsTr("完整分析"); onClicked: backend.analyzeReadyJob(s.jobId) }
                     AppButton { visible: s.running; text: qsTr("取消"); onClicked: backend.cancel() }
                     AppButton { visible: s.canRetry; text: qsTr("重试"); onClicked: backend.retry() }
                     AppButton { objectName: "removeDisplayedJob"; text: qsTr("删除"); tip: s.running ? qsTr("取消分析并删除任务") : qsTr("删除任务记录"); onClicked: backend.removeDisplayedJob() }
@@ -239,7 +293,7 @@ ApplicationWindow {
                 PitchView { objectName: "pitchView"; controller: backend; anchors.fill: parent; anchors.margins: 18; visible: s.loaded }
                 Column { visible: !s.loaded; anchors.centerIn: parent; spacing: 18
                     Text { text: qsTr("拖入一首歌"); font.pixelSize: 27; font.bold: true; color: Theme.text }
-                    AppButton { text: qsTr("选择音频"); primary: true; onClicked: audioDialog.open() }
+                    AppButton { text: qsTr("选择音频"); primary: true; onClicked: { audioDialog.stemsOnly = false; audioDialog.open() } }
                 }
             }
             Rectangle {
@@ -295,16 +349,12 @@ ApplicationWindow {
                     RowLayout {
                         id: stemOptions; objectName: "stemExportOptions"
                         visible: s.loaded && stemTracks.length > 0
-                        readonly property var labels: ({
-                            "vocals": qsTr("人声"), "lead-vocals": qsTr("主唱"), "instrumental": qsTr("伴奏"),
-                            "backing-vocals": qsTr("和声"), "backing-mix": qsTr("和声与伴奏")
-                        })
                         Repeater {
                             model: stemTracks
                             delegate: AppButton {
                                 required property string modelData
                                 objectName: "export-" + modelData
-                                text: stemOptions.labels[modelData]
+                                text: stemLabels[modelData]
                                 enabled: !s.exportingStem
                                 onClicked: Qt.callLater(win.saveStem, modelData)
                             }
@@ -449,7 +499,7 @@ ApplicationWindow {
         id: toast; anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 26; width: Math.min(win.width-80,toastRow.implicitWidth+32); height: 48; radius: 14; color: Theme.panel; border.color: Theme.line; visible: toastTimer.running; z: 10
         RowLayout { id: toastRow; anchors.centerIn: parent; spacing: 16
             Text { text: s.message; color: Theme.text; font.pixelSize: 12 }
-            AppButton { visible: s.canUndo; text: qsTr("撤销"); onClicked: { backend.undoDelete(); selectedSongs=[] } }
+            AppButton { visible: s.canUndo; text: qsTr("撤销"); onClicked: { backend.undoDelete(); clearSongSelection() } }
         }
         Timer { id: toastTimer; objectName: "toastTimer"; interval: 6500 }
         Connections {
@@ -469,7 +519,11 @@ ApplicationWindow {
         id: songContext; objectName: "songContext"; property int targetIndex: -1; popupType: Popup.Item; width: 180; padding: 6
         background: Rectangle { radius: 12; color: Theme.panel; border.color: Theme.line }
         MenuItem { objectName: "removeSongAction"; text: qsTr("从歌曲库移除"); onTriggered: backend.deleteSongs([songContext.targetIndex]); contentItem: Text { text: parent.text; color: Theme.dark ? "#ff9d9d" : "#bc3445"; font.pixelSize: 13; verticalAlignment: Text.AlignVCenter } background: Rectangle { radius: 7; color: parent.highlighted ? Theme.hover : "transparent" } }
-        MenuItem { text: qsTr("批量管理"); onTriggered: { managing=true; selectedSongs=[songContext.targetIndex] } contentItem: Text { text: parent.text; color: Theme.text; font.pixelSize: 13; verticalAlignment: Text.AlignVCenter } background: Rectangle { radius: 7; color: parent.highlighted ? Theme.hover : "transparent" } }
+        MenuItem { text: qsTr("批量管理"); onTriggered: { managing=true; selectionAnchor=songContext.targetIndex; selectedSongs=[selectionAnchor] } contentItem: Text { text: parent.text; color: Theme.text; font.pixelSize: 13; verticalAlignment: Text.AlignVCenter } background: Rectangle { radius: 7; color: parent.highlighted ? Theme.hover : "transparent" } }
     }
-    Connections { target: backend; function onContentChanged() { selectedSongs=[]; stemTracks=[]; Qt.callLater(function() { if (s.loaded) focusLoop() }) } }
+    Connections {
+        target: backend
+        function onLibraryChanged() { clearSongSelection() }
+        function onContentChanged() { stemTracks=[]; Qt.callLater(function() { if (s.loaded) focusLoop() }) }
+    }
 }

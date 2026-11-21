@@ -19,7 +19,8 @@ def run_jobs():
             request=json.loads(line)
             job_id=request['id']
             separation=request.get('separation','mel_bs')
-            execute(request['source'],request['result_file'],True,separation)
+            execute(request['source'],request['result_file'],True,separation,recording=request.get('recording'),
+                    stems_only=request.get('stems_only',False),job_id=job_id)
         except (Exception,SystemExit):
             traceback.print_exc()
             print('VPL_JOB_DONE '+json.dumps(dict(id=job_id,code=1)),flush=True)

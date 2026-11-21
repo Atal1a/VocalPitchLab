@@ -45,6 +45,8 @@ def main():
         name=f'RELEASE_NOTES_{args.version}{suffix}'
         if not (notes_dir/name).is_file():
             raise SystemExit(f'Missing release notes: {name}')
+        guide=docs/'releases'/f'INSTALLATION_{args.version}{suffix}'
+        if guide.is_file():copy(guide,notes_dir/guide.name)
     # Older experimental tests rely on private audio and removed application modules.
     for pattern in ['test_*.py','package_*.py']:
         for path in sorted((ROOT/'tests').glob(pattern)):

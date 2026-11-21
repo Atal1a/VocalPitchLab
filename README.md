@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="docs/releases/RELEASE_NOTES_1.2.0.md"><img src="docs/images/badge-version.svg" alt="版本 1.2.0" height="28"></a>
+  <a href="docs/releases/RELEASE_NOTES_1.3.0.md"><img src="docs/images/badge-version.svg" alt="版本 1.3.0" height="28"></a>
   <a href="docs/INSTALLATION.md"><img src="docs/images/badge-platform.svg" alt="Windows x64" height="28"></a>
   <a href="LICENSE"><img src="docs/images/badge-license.svg" alt="GPL-3.0-only" height="28"></a>
 </p>
@@ -59,8 +59,8 @@
 
 ## 开始使用
 
-1. 从 [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest) 下载同一版本的安装程序和**全部 `.bin` 分卷**，放在同一文件夹，保持原文件名。
-2. 运行安装程序完成安装，无需配置 Python 或 CUDA Toolkit。已有用户先关闭软件，再覆盖安装到原目录，无须先卸载。
+1. 在 [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest) 选择 CPU 单文件安装包，或下载 NVIDIA 安装程序及全部配套分卷。
+2. 运行所选版本的安装程序。已安装 1.2.0 的用户可以关闭软件后运行单文件更新包。
 3. 打开 VocalPitchLab，点击「导入歌曲」，等待分析完成后播放、查看和比对。
 
 兼容的 NVIDIA 显卡和驱动可以加速分析；没有可用的 GPU 加速时会使用 CPU，分析明显较慢。首次安装、覆盖更新及常见问题，见 [安装说明](docs/INSTALLATION.md)。
@@ -81,7 +81,7 @@
 
 ## English
 
-[简体中文](#chinese) · [Release notes](docs/releases/RELEASE_NOTES_1.2.0.en.md) · [Installation](docs/INSTALLATION.en.md)
+[简体中文](#chinese) · [Release notes](docs/releases/RELEASE_NOTES_1.3.0.en.md) · [Installation](docs/INSTALLATION.en.md)
 
 VocalPitchLab is an open-source app for analyzing vocal pitch in popular music. It runs locally on Windows.
 
@@ -121,8 +121,8 @@ Click a note label to the left of the chart to hear its piano pitch. Hold the la
 
 ### Get started
 
-1. Download the installer and **all matching `.bin` volumes** for the same version from [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest). Keep their original names and place them in the same folder.
-2. Run the installer. No separate Python or CUDA Toolkit setup is required. To upgrade, close the app and install into the existing folder. There is no need to uninstall first.
+1. On [GitHub Releases](https://github.com/Atal1a/VocalPitchLab/releases/latest), choose the single-file CPU installer or download the NVIDIA installer and all its volumes.
+2. Run the installer for your edition. If you have 1.2.0 installed, close the app and run the single-file update instead.
 3. Open VocalPitchLab, choose **Import songs**, and wait for analysis to finish before playing and comparing pitches.
 
 A compatible NVIDIA GPU and driver can speed up analysis. Without GPU acceleration, analysis runs on the CPU and takes considerably longer. See the [installation guide](docs/INSTALLATION.en.md) for first-time installation, upgrades, and troubleshooting.
