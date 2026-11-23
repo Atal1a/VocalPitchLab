@@ -42,7 +42,7 @@ class AnalysisQueueUITests(unittest.TestCase):
             try:
                 for _ in range(2):
                     drop_file()
-                    self.assertEqual(controller.state['message'], '请选择有效的音频文件。')
+                    self.assertEqual(controller.state['message'], '请选择支持的音频或视频文件。')
                     self.assertTrue(timer.property('running'))
                     self.assertEqual(controller.data['jobs'], [])
                     QTest.qWait(200)

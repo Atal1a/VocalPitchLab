@@ -2,6 +2,7 @@
 import csv,hashlib,json,sys,uuid,subprocess,math,os,time,re
 from collections import OrderedDict, defaultdict
 from zipfile import BadZipFile
+from vocalpitchlab.audio import VIDEO_FORMATS
 from vocalpitchlab.analysis.recording import decoded_hash, prepared_original, recording_request, same_recording, source_signature
 from vocalpitchlab.analysis.analysis_cache import digest_file
 from vocalpitchlab.runtime.paths import APP_ROOT, DATA_ROOT, prepare, worker_python
@@ -23,7 +24,7 @@ from PySide6.QtMultimedia import QMediaPlayer,QAudioOutput
 
 ROOT=APP_ROOT
 prepare()
-FORMATS={'.mp3','.wav','.flac','.m4a','.aac','.ogg','.wma','.aiff'}
+FORMATS={'.mp3','.wav','.flac','.m4a','.aac','.ogg','.wma','.aiff'} | VIDEO_FORMATS
 LABELS={'crepe_full':'CREPE 完整版','crepe_tiny':'CREPE 轻量版','rmvpe_vocals':'RMVPE','tuned_vocals':'调参候选'}
 COLORS={'crepe_full':'#0072b2','crepe_tiny':'#b45309','rmvpe_vocals':'#b01874','tuned_vocals':'#111827'}
 PITCH_MODES={'fusion':'tuned_vocals','crepe':'crepe_full','rmvpe':'rmvpe_vocals','tracked':'rmvpe_tracked','fcpe':'fcpe'}
@@ -952,12 +953,12 @@ class Controller(QObject):
             try:
                 path=local_path(url).resolve()
                 if path.suffix.lower() not in FORMATS or not path.is_file():
-                    message='请选择有效的音频文件。';continue
+                    message='请选择支持的音频或视频文件。';continue
                 signature=source_signature(path)
                 key=source_key(path)
                 new_job, result_message = self.import_job(path, signature, songs[key], jobs[key], stems_only=stems_only)
             except OSError:
-                message='无法读取音频文件，请检查权限或文件是否仍存在。';continue
+                message='无法读取文件，请检查权限或文件是否仍存在。';continue
             if new_job is None:
                 message=result_message;continue
             added.append(new_job);jobs[key].append(new_job)
@@ -1148,10 +1149,17 @@ class Controller(QObject):
             if line.startswith('VPL_JOB_DONE ') and self.reusable_worker and self.active:
                 try:
                     done=json.loads(line[13:])
-                    if done.get('id')==self.active['id']:self.finished(int(done['code']),job_done=True)
+                    if done.get('id')==self.active['id']:
+                        self.finished(int(done['code']),job_done=True,error_message=done.get('error'))
                 except (ValueError,TypeError,KeyError):pass
             elif line.startswith('VPL_EVENT ') and self.active:
-                try:self.active.update(json.loads(line[10:]));self.changed.emit()
+                try:
+                    event=json.loads(line[10:])
+                    if 'notice' in event:
+                        self.feedback(event['notice'],name=Path(self.active['source']).name)
+                    else:
+                        self.active.update(event)
+                        self.changed.emit()
                 except (ValueError,TypeError):pass
             elif line.startswith('VPL_STEMS_READY ') and self.active and self.active['state']=='running':
                 try:
@@ -1161,7 +1169,7 @@ class Controller(QObject):
                         self.active['stems']=stems
                         self.save();self.contentChanged.emit();self.changed.emit()
                 except (ValueError,TypeError,KeyError):pass
-    def finished(self,code,*args,job_done=False):
+    def finished(self,code,*args,job_done=False,error_message=None):
         if not self.process or not self.active:return
         if not job_done:self.read_progress()
         if not self.active:return
@@ -1179,6 +1187,8 @@ class Controller(QObject):
                 else:
                     self.finish_analysis(job,payload['song'])
             except RESULT_ERRORS:job.update(state='failed',message='结果未完整保存，请重试')
+        elif error_message:
+            job.update(state='failed',message=error_message)
         else:
             log=self.log_file.read_text(encoding='utf-8',errors='replace')[-12000:] if self.log_file.exists() else ''
             reason='音频读取或分析失败，可重新导入或重试'

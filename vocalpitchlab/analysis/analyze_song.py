@@ -3,8 +3,13 @@ import argparse
 import json
 import time
 from pathlib import Path
+from vocalpitchlab.audio import VIDEO_FORMATS
 from vocalpitchlab.runtime.paths import DATA_ROOT, prepare
 from vocalpitchlab.analysis.analysis_cache import atomic_json
+
+
+class NoAudioTrack(ValueError):
+    """The input container has no audio stream to decode."""
 
 
 def execute(file,result_file=None,standalone=True,separation='mel_bs',*,recording=None,stems_only=False,job_id=None):
@@ -13,8 +18,16 @@ def execute(file,result_file=None,standalone=True,separation='mel_bs',*,recordin
         print('VPL_EVENT '+json.dumps(dict(progress=value, message=message), ensure_ascii=False), flush=True)
     def ready(stems):
         print('VPL_STEMS_READY '+json.dumps(dict(id=job_id, stems=stems), ensure_ascii=False), flush=True)
+    source = Path(file)
+    if recording is None and source.suffix.lower() in VIDEO_FORMATS:
+        from vocalpitchlab.audio.audio_io import audio_stream_count
+        tracks = audio_stream_count(source)
+        if tracks == 0:
+            raise NoAudioTrack("这个文件没有音轨，请换一个文件。")
+        if tracks is not None and tracks > 1:
+            print('VPL_EVENT '+json.dumps(dict(notice="{name} 包含多条音轨，将自动选择其中一条。"), ensure_ascii=False), flush=True)
     from vocalpitchlab.analysis.production_pipeline import analyze
-    song = analyze(Path(file), separation, progress, recording=recording, stems_only=stems_only, stems_ready=ready)
+    song = analyze(source, separation, progress, recording=recording, stems_only=stems_only, stems_ready=ready)
     if stems_only:
         if result_file:
             atomic_json(Path(result_file), dict(stems=song))

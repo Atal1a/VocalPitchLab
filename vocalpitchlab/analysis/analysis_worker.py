@@ -12,7 +12,7 @@ def main():
 
 
 def run_jobs():
-    from vocalpitchlab.analysis.analyze_song import execute
+    from vocalpitchlab.analysis.analyze_song import NoAudioTrack, execute
     for line in sys.stdin:
         job_id=None
         try:
@@ -21,6 +21,9 @@ def run_jobs():
             separation=request.get('separation','mel_bs')
             execute(request['source'],request['result_file'],True,separation,recording=request.get('recording'),
                     stems_only=request.get('stems_only',False),job_id=job_id)
+        except NoAudioTrack as error:
+            print('VPL_JOB_DONE '+json.dumps(dict(id=job_id,code=1,error=str(error))),flush=True)
+            return 1
         except (Exception,SystemExit):
             traceback.print_exc()
             print('VPL_JOB_DONE '+json.dumps(dict(id=job_id,code=1)),flush=True)

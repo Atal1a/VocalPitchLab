@@ -61,7 +61,7 @@ ApplicationWindow {
         property bool stemsOnly: false
         title: stemsOnly ? qsTr("仅导出音轨") : qsTr("导入歌曲")
         currentFolder: backend.inputUrl; fileMode: FileDialog.OpenFiles
-        nameFilters: [qsTr("音频 (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma *.aiff)")]
+        nameFilters: [qsTr("音频或视频 (*.mp3 *.wav *.flac *.m4a *.aac *.ogg *.wma *.aiff *.mp4 *.mov *.m4v)")]
         onAccepted: backend.enqueueBatch(selectedFiles.map(file => file.toString()), stemsOnly)
     }
     FileDialog {
@@ -293,7 +293,7 @@ ApplicationWindow {
                 PitchView { objectName: "pitchView"; controller: backend; anchors.fill: parent; anchors.margins: 18; visible: s.loaded }
                 Column { visible: !s.loaded; anchors.centerIn: parent; spacing: 18
                     Text { text: qsTr("拖入一首歌"); font.pixelSize: 27; font.bold: true; color: Theme.text }
-                    AppButton { text: qsTr("选择音频"); primary: true; onClicked: { audioDialog.stemsOnly = false; audioDialog.open() } }
+                    AppButton { text: qsTr("选择音频或视频"); primary: true; onClicked: { audioDialog.stemsOnly = false; audioDialog.open() } }
                 }
             }
             Rectangle {
