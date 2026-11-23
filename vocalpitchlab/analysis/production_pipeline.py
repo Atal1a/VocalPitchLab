@@ -5,53 +5,53 @@ import time
 import numpy as np
 import soundfile as sf
 from vocalpitchlab.analysis.analysis_cache import stage, digest_file, atomic_json
+from vocalpitchlab.analysis.recording import RecordingChanged, prepared_original, source_signature
 
 SEPARATION_MODES = ('original', 'mel_roformer', 'bs_only', 'mel_bs', 'htdemucs')
 
 
-def analyze(source, separation='mel_bs', progress=None):
-    from vocalpitchlab.analysis.pipeline_timing import Timeline
-    timeline=Timeline()
-    from vocalpitchlab.audio.audio_io import decode, track, write_track, separate as demucs
+def prepare_stems(source, separation, progress, recording, device, resource, cached, metrics, timeline):
+    from vocalpitchlab.audio.audio_io import decode, separate as demucs
     from vocalpitchlab.audio.vocal_separator import separate, VERSION as separation_version
-    from vocalpitchlab.runtime.resource_policy import device as select_device, clear, overlap_game, hardware
-    import torch
-    if separation not in SEPARATION_MODES:
-        raise ValueError('Invalid separation')
-    progress = progress or (lambda value, message: None)
-    source = Path(source).resolve()
-    hardware(replay=True)
-    device = select_device()
-    if device=='cuda':torch.cuda.reset_peak_memory_stats()
-    resource = dict(device=device, torch=torch.__version__, memory_limit=os.environ.get('VPL_CUDA_MEMORY_GIB', '0'))
-    if separation == 'original':
-        torch.set_num_threads(4)
-    else:
-        from vocalpitchlab.audio.separation_execution import select as separation_policy
-        resource['separation_execution']=separation_policy(device)
-    metrics = {}
-
-    def cached(name, signature, build):
-        with timeline.span(name):paths, meta = stage(name, signature, build)
-        if name in ['vocals','lead']:
-            import json
-            detail=paths['audio'].parent/('lead-separation' if name=='lead' else 'separation')/'resources.json'
-            if detail.is_file():
-                try:meta['recorded_execution']=dict(from_cache=meta['hit'],details=json.loads(detail.read_text()))
-                except (OSError,ValueError):pass
-        metrics[name] = meta
-        return paths
 
     progress(5, '读取音频')
-    with timeline.span('source_hash'):source_hash = digest_file(source)
+    signature = recording.get('source_signature') if recording else None
+    original = prepared_original(recording) if recording else None
+    if original:
+        source_hash = recording['source_sha256']
+        metrics['decode'] = dict(key=recording['decode_key'], content={'audio': recording['decoded_sha256']},
+                                 hit=True, seconds=0)
+    elif recording:
+        source_hash = recording['source_sha256']
+        if not source_hash:
+            raise RecordingChanged('Verified recording unavailable')
+    else:
+        with timeline.span('source_hash'):
+            signature = source_signature(source)
+            source_hash = digest_file(source)
+
     def decoded(folder):
+        nonlocal signature
+        if recording:
+            if not source.is_file():
+                raise RecordingChanged('Verified recording unavailable')
+            signature = source_signature(source)
+            if digest_file(source) != source_hash:
+                raise RecordingChanged('Input contents changed')
         path = folder/'original.wav'
         decode(source, path, 0, 0)
+        if source_signature(source) != signature or digest_file(source) != source_hash:
+            raise RecordingChanged('Input contents changed while decoding')
+        if recording and recording['decoded_sha256'] and digest_file(path) != recording['decoded_sha256']:
+            raise RecordingChanged('Decoded audio does not match the saved recording')
         info = sf.info(path)
         if info.frames < 1600 or info.samplerate != 44100 or info.channels != 2:
             raise ValueError('Invalid decoded audio')
         return dict(audio=path)
-    original = cached('decode', dict(source=source_hash, version='ffmpeg-float32-stereo-44100-v1'), decoded)['audio']
+    if original is None:
+        original = cached('decode', dict(source=source_hash, version='ffmpeg-float32-stereo-44100-v1'), decoded)['audio']
+        if recording and recording['decoded_sha256'] and metrics['decode']['content']['audio'] != recording['decoded_sha256']:
+            raise RecordingChanged('Decoded audio does not match the saved recording')
     duration = sf.info(original).duration
     def separated(input_path, folder, lead=False):
         audio, sr = sf.read(input_path, dtype='float32', always_2d=True)
@@ -67,7 +67,8 @@ def analyze(source, separation='mel_bs', progress=None):
         progress(15, '提取人声')
         full_version = 'htdemucs-v1' if separation == 'htdemucs' else separation_version
         vocals = cached('vocals', dict(input=vocal_key, version=full_version, resource=resource),
-                        lambda folder: separated(original, folder))['audio']
+                        lambda folder: separated(original, folder),
+                        after_publish=lambda folder: (folder/'separation'/'v.wav').unlink(missing_ok=True))['audio']
         vocal_key = metrics['vocals']['content']['audio']
     lead_version = 'bs-frazer-becruily-eb90ee24-overlap4-v1'
     harmony = separation in ('mel_bs', 'bs_only')
@@ -75,9 +76,64 @@ def analyze(source, separation='mel_bs', progress=None):
         progress(35, '分离和声')
         harmony_input = vocals
         vocals = cached('lead', dict(input=vocal_key, version=lead_version, resource=resource),
-                        lambda folder: separated(harmony_input, folder, lead=True))['audio']
+                        lambda folder: separated(harmony_input, folder, lead=True),
+                        after_publish=lambda folder: (folder/'lead-separation'/'v.wav').unlink(missing_ok=True))['audio']
         vocal_key = metrics['lead']['content']['audio']
+    song = dict(name=source.stem, duration=duration, source=str(source), source_sha256=source_hash,
+                source_signature=signature, baseline=str(vocals.parent),
+                audio=dict(original=str(original), vocals=str(vocals)), stage_cache=metrics,
+                created=time.strftime('%Y-%m-%d %H:%M:%S'),
+                algorithm=dict(pipeline='lead-default-v2', separation=separation,
+                               separation_version=full_version, harmony_separation=harmony))
+    if separation == 'mel_bs':
+        song['full_vocals'] = str(harmony_input)
+    if harmony:song['algorithm']['lead_separation_version'] = lead_version
+    return song, vocal_key
+
+
+def analyze(source, separation='mel_bs', progress=None, *, recording=None, stems_only=False, stems_ready=None):
+    from vocalpitchlab.analysis.pipeline_timing import Timeline
+    from vocalpitchlab.runtime.resource_policy import device as select_device, clear, overlap_game, hardware
+    import torch
+
+    if separation not in SEPARATION_MODES or (stems_only and separation == 'original'):
+        raise ValueError('Invalid separation')
+    timeline=Timeline()
+    progress = progress or (lambda value, message: None)
+    source = Path(source).resolve()
+    hardware(replay=True)
+    device = select_device()
+    if device=='cuda':torch.cuda.reset_peak_memory_stats()
+    resource = dict(device=device, torch=torch.__version__, memory_limit=os.environ.get('VPL_CUDA_MEMORY_GIB', '0'))
+    if separation == 'original':
+        torch.set_num_threads(4)
+    else:
+        from vocalpitchlab.audio.separation_execution import select as separation_policy
+        resource['separation_execution']=separation_policy(device)
+    metrics = {}
+
+    def cached(name, signature, build, *, after_publish=None):
+        with timeline.span(name):paths, meta = stage(name, signature, build, after_publish=after_publish)
+        if name in ['vocals','lead']:
+            import json
+            detail=paths['audio'].parent/('lead-separation' if name=='lead' else 'separation')/'resources.json'
+            if detail.is_file():
+                try:meta['recorded_execution']=dict(from_cache=meta['hit'],details=json.loads(detail.read_text()))
+                except (OSError,ValueError):pass
+        metrics[name] = meta
+        return paths
+
+    song, vocal_key = prepare_stems(source, separation, progress, recording, device, resource, cached, metrics, timeline)
+    if stems_ready is not None and separation != 'original':
+        stems_ready(song)
     clear()
+    if stems_only:
+        metrics['timing'] = timeline.report()
+        return song
+
+    vocals = Path(song['audio']['vocals'])
+    duration = song['duration']
+    from vocalpitchlab.audio.audio_io import track, write_track
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
     cancel_game=Event()
@@ -120,15 +176,9 @@ def analyze(source, separation='mel_bs', progress=None):
         raise
     finally:
         if executor:executor.shutdown(wait=True,cancel_futures=True)
-    song = dict(result_format=2, name=source.stem, duration=duration, source=str(source), source_sha256=source_hash,
-                baseline=str(vocals.parent), audio=dict(original=str(original), vocals=str(vocals)),
-                curves=dict(crepe_full=str(full_curve), rmvpe_vocals=str(curves['raw']), rmvpe_tracked=str(curves['tracked'])),
-                created=time.strftime('%Y-%m-%d %H:%M:%S'), review_windows=[],
-                algorithm=dict(pipeline='lead-default-v2', display_pitch='rmvpe_tracked', separation=separation,
-                               separation_version=full_version, harmony_separation=harmony))
-    if separation == 'mel_bs':
-        song['full_vocals'] = str(harmony_input)
-    if harmony:song['algorithm']['lead_separation_version'] = lead_version
+    song.update(result_format=2, review_windows=[],
+                curves=dict(crepe_full=str(full_curve), rmvpe_vocals=str(curves['raw']), rmvpe_tracked=str(curves['tracked'])))
+    song['algorithm']['display_pitch'] = 'rmvpe_tracked'
     progress(90, '识别音符边界')
     try:
         song['game_notes'] = str(game_future.result() if game_future else run_game())
@@ -142,7 +192,6 @@ def analyze(source, separation='mel_bs', progress=None):
     with timeline.span('presentation'):song['presentation'] = prepare(song)
     song['main_notes'] = song['presentation']['notes']
     song['algorithm']['note_events'] = (VERSION if song.get('game_notes') else 'curve-fallback')+'+'+REFINEMENT_VERSION
-    song['stage_cache'] = metrics
     if device == 'cuda':
         metrics['cuda_peak_allocated_mib'] = torch.cuda.max_memory_allocated()/2**20
         metrics['cuda_peak_reserved_mib'] = torch.cuda.max_memory_reserved()/2**20

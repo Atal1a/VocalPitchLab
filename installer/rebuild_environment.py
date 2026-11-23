@@ -22,6 +22,8 @@ def main():
     p.add_argument('--local-evaluation',action='store_true')
     p.add_argument('--stage',type=Path,default=ROOT/'work/repro-build/app')
     p.add_argument('--artifacts',type=Path,default=ROOT/'work/repro-build')
+    p.add_argument('--runtime', choices=['nvidia', 'cpu'], default='nvidia')
+    p.add_argument('--cpu-wheels', type=Path, help='Directory containing the two pinned CPU wheels')
     args=p.parse_args()
     if not args.local_evaluation: p.error('Only local evaluation is permitted while redistribution review is pending')
     if sys.version_info[:2] != (3,12) or sys.platform!='win32' or platform.architecture()[0]!='64bit':
@@ -31,8 +33,18 @@ def main():
         p.error('Stage must be a new directory below project work/')
     frozen=ROOT/'resources/reproducible'
     records=json.loads((frozen/'artifacts.json').read_text(encoding='utf-8'))
+    wheel_dirs=[(args.artifacts/'wheels').resolve()]
+    runtime_lock='runtime.lock'
+    if args.runtime=='cpu':
+        cpu_wheels=(args.cpu_wheels or args.artifacts/'cpu-wheels').resolve()
+        cpu_records=json.loads((frozen/'cpu-artifacts.json').read_text(encoding='utf-8'))
+        records=[r for r in records if r['group']!='wheels' or r['name'].lower() not in {'torch', 'torchaudio'}]
+        records.extend(cpu_records)
+        wheel_dirs.append(cpu_wheels)
+        runtime_lock='runtime-cpu.lock'
     for r in records:
-        asset=args.artifacts/r['group']/r['file']
+        folder=cpu_wheels if r['group']=='cpu-wheels' else args.artifacts/r['group']
+        asset=folder/r['file']
         if not asset.is_file() or digest(asset)!=r['sha256']:raise ValueError('Missing or modified wheel: '+r['file'])
     binaries=json.loads((frozen/'local-assets.json').read_text(encoding='utf-8'))
     for r in binaries:
@@ -44,9 +56,10 @@ def main():
     def run(command):subprocess.run(command,check=True,env=env,cwd=stage)
     run([sys.executable,'-I','-m','venv',str(stage/'runtime')])
     python=stage/'runtime/Scripts/python.exe'
-    for group,lock,target in [('wheels','runtime.lock',None),('vendor-wheels','separation.lock',stage/'vendor/separation-runtime')]:
+    for dirs,lock,target in [(wheel_dirs,runtime_lock,None),([args.artifacts/'vendor-wheels'],'separation.lock',stage/'vendor/separation-runtime')]:
         command=[str(python),'-I','-m','pip','install','--no-index','--no-deps','--require-hashes',
-                 '--find-links',str((args.artifacts/group).resolve()),'-r',str(frozen/lock)]
+                 '-r',str(frozen/lock)]
+        for directory in dirs:command+=['--find-links',str(directory.resolve())]
         if target:command+=['--target',str(target)]
         run(command)
     run([str(python),'-I','-m','pip','check'])
@@ -67,7 +80,7 @@ def main():
     for r in binaries:copy(ROOT/r['path'],stage/r['path'])
     copy(ROOT/'installer/launch.py',stage/'launch.py')
     (stage/'BUILD_EVIDENCE.json').write_text(json.dumps(dict(
-        python=sys.version,isolated=True,dependency_install='offline hash-locked wheels',
+        python=sys.version,isolated=True,runtime=args.runtime,dependency_install='offline hash-locked wheels',
         stage=str(stage),source_packages_copied=False,
         scope='Same-host clean Python environment; not fresh Windows or public distribution approval'),indent=2))
     print('Clean environment ready:',stage,flush=True)

@@ -58,7 +58,7 @@ def locked(path):
                 fcntl.flock(stream, fcntl.LOCK_UN)
 
 
-def stage(name, signature, producer):
+def stage(name, signature, producer, *, after_publish=None):
     """Producer returns named files within its private work directory.
 
     Only a valid manifest publishes a stage. Interrupted/failed work directories
@@ -88,4 +88,6 @@ def stage(name, signature, producer):
         seconds = time.perf_counter() - start
         files = {k: dict(path=p.relative_to(folder).as_posix(), size=p.stat().st_size, sha256=digest_file(p)) for k, p in paths.items()}
         atomic_json(manifest, dict(signature=signature, seconds=seconds, files=files))
+        if after_publish is not None:
+            after_publish(work)
         return paths, dict(key=key, content={k:v['sha256'] for k,v in files.items()}, hit=False, seconds=round(seconds, 3))

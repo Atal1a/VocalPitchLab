@@ -18,13 +18,19 @@ GPU 运行环境固定为 PyTorch 2.7.1、torchaudio 2.7.1 的 CUDA 12.8 构建�
 
 使用新缓存目录时，向 `lock_artifacts.py --artifacts <缓存目录>` 和 `rebuild_environment.py --artifacts <缓存目录>` 传入同一目录。缓存内每个包只保留一个目标版本；`wheels/` 与 `vendor-wheels/` 分别对应两个锁定清单。
 
+CPU 环境使用 PyTorch 和 torchaudio 2.7.1 的 Windows x64 CPU wheels。地址与校验值见 `resources/reproducible/cpu-artifacts.json`，其余依赖与 NVIDIA 环境共用缓存。重建时传入 `--runtime cpu --cpu-wheels <CPU wheel 目录>`。组装时将 `--runtime cpu` 和对应的 `--dependencies` 一起传给 `prepare_delivery.py`，为两种运行环境分别指定构建目录。编译单文件 CPU 安装包时，向 Inno Setup 传入 `/DCpuPackage /DSingleFileOffline`。
+
 组装后，用候选目录自带的 Python 检查版本、GPU 实际运算、音频算子以及 `sm_120` 内核：
 
 ```powershell
 <候选目录>/runtime/python.exe -I -B tests/package_gpu_check.py <候选目录> --output <测试结果目录>/gpu.json
 ```
 
-GitHub 发布附件包括完整安装程序、配套分卷、源码包、安装说明和更新内容。单文件完整安装包通过夸克网盘提供。
+1.3.0 的 GitHub 附件包括 CPU 单文件安装包、NVIDIA 安装程序及其分卷、从 1.2.0 升级的单文件更新包和源码包。将同一版本的附件放入发布目录，允许按版本类型放入子目录。以下命令校验附件并生成 `assets.json` 和 `安装说明.txt`。
+
+```powershell
+python installer/prepare_github_assets.py --directory dist/VocalPitchLab-1.3.0
+```
 
 常规安装包构建使用 Ultra64 分组固实压缩：
 
@@ -70,7 +76,7 @@ python installer/package_benchmark.py --stage build/delivery-candidate --output 
 python installer/build_update.py --baseline <正式版应用目录> --stage <新版本应用目录> --from-version 1.1.0 --version 1.1.1 --output work/update-1.1.1 --removals <组装报告目录>/optional-trim.json
 ```
 
-基线必须来自已发布且校验通过的完整安装包。构建器逐文件比较 SHA-256，默认只携带程序和资源的变化。需要替换 Python 运行环境内的依赖时，显式传入 `--include-runtime`；该模式使用分卷，保留原有模型，并为替换及移除的文件预留备份空间。模型、第三方分离代码或 FFmpeg 需要替换时仍使用完整安装包。
+基线必须来自已发布且校验通过的完整安装包。构建器逐文件比较 SHA-256，默认只携带程序和资源的变化。需要替换 Python 运行环境内的依赖时，显式传入 `--include-runtime`。更新保留原有模型，为替换及移除的文件预留备份空间，并对较大的运行库更新使用分卷。模型、第三方分离代码或 FFmpeg 需要替换时仍使用完整安装包。
 
 包含运行库的更新示例：
 

@@ -11,6 +11,9 @@ def probe(torch_module=None):
     if os.environ.get('VPL_DEVICE') == 'cpu':
         result['reason'] = '已指定使用 CPU'
         return result
+    if t.version.cuda is None:
+        result['reason'] = 'CPU 安装包'
+        return result
     try:
         if not t.cuda.is_available():
             result['reason'] = '未检测到可用的 NVIDIA GPU 加速，请检查显卡和驱动'

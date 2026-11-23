@@ -9,7 +9,7 @@ from pathlib import Path
 from application_files import SOURCE_FILES, RESOURCES, VENDOR
 from trim_runtime import trim
 from privacy_check import ignore_private_files, inspect
-from gpu_runtime import validate_gpu_dependencies
+from gpu_runtime import validate_runtime_dependencies
 
 ROOT = Path(__file__).resolve().parents[1]
 STAGE = ROOT / 'build/delivery-1.2.0'
@@ -27,6 +27,7 @@ def main():
     global STAGE, CLEAN, BASE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version', default='1.2.0')
+    parser.add_argument('--runtime', choices=['nvidia', 'cpu'], default='nvidia')
     parser.add_argument('--stage', type=Path, default=STAGE)
     parser.add_argument('--dependencies', type=Path, default=CLEAN)
     parser.add_argument('--base-runtime', type=Path, default=BASE)
@@ -45,7 +46,7 @@ def main():
         raise SystemExit('Delivery stage already exists; choose a fresh stage directory')
     if not CLEAN.is_dir() or not BASE.is_dir():
         raise SystemExit('Prepared dependency and base runtime directories are required')
-    validate_gpu_dependencies(CLEAN/'runtime/Lib/site-packages')
+    runtime_versions = validate_runtime_dependencies(CLEAN/'runtime/Lib/site-packages', args.runtime)
     if reports.exists() and any(reports.iterdir()):
         raise SystemExit('Choose a fresh report directory')
     reports.mkdir(parents=True, exist_ok=True)
@@ -53,7 +54,13 @@ def main():
     for name in SOURCE_FILES: copy(ROOT/name, STAGE/name)
     for name in RESOURCES: copy(ROOT/name, STAGE/Path(name).name)
     for name in ('INSTALLATION.md', 'INSTALLATION.en.md', 'CHANGELOG.md', 'CHANGELOG.en.md'):
-        copy(ROOT/'docs'/name, STAGE/name)
+        guide = ROOT/'docs/releases'/name.replace('INSTALLATION', 'INSTALLATION_'+args.version)
+        if name.startswith('INSTALLATION') and guide.is_file():
+            text=guide.read_text(encoding='utf-8').replace('INSTALLATION_'+args.version,'INSTALLATION')
+            (STAGE/name).write_text(text,encoding='utf-8')
+        else:
+            copy(ROOT/'docs'/name, STAGE/name)
+    (STAGE/'runtime-variant.txt').write_text(args.runtime+'\n', encoding='ascii')
     copy(ROOT/'installer/launch.py', STAGE/'launch.py')
     for name in [*VENDOR, 'separation-runtime']: copy(CLEAN/'vendor'/name, STAGE/'vendor'/name)
     copy(CLEAN/'models', STAGE/'models')
@@ -90,6 +97,7 @@ def main():
             files.append(dict(path=p.relative_to(STAGE).as_posix(),bytes=p.stat().st_size,sha256=digest))
     (reports/'manifest.json').write_text(json.dumps(dict(version=args.version,
         tests_run=False,code_signing=False,distribution_review='pending',
+        runtime_variant=args.runtime,runtime_versions=runtime_versions,
         runtime='CPython standalone base from earlier package; dependencies from clean rebuilt environment',
         files=files),indent=2),encoding='utf-8')
     print(STAGE,flush=True)

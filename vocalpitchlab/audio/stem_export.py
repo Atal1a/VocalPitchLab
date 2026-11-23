@@ -1,4 +1,4 @@
-"""Export aligned tracks from a completed analysis."""
+"""Export aligned tracks from published separation results."""
 from contextlib import ExitStack
 from dataclasses import dataclass
 import json

@@ -2,6 +2,7 @@ import tempfile,unittest
 from pathlib import Path
 from installer.trim_optional_runtime import browser_file,audit,trim_browser
 from installer.package_benchmark import write_include,verify,manifest,verify_assets,digest
+from installer.prepare_github_assets import prepare as prepare_github_assets
 
 class PackageSizeTests(unittest.TestCase):
     def test_browser_rules_preserve_runtime_and_notices(self):
@@ -50,5 +51,35 @@ class PackageSizeTests(unittest.TestCase):
             rows=[dict(name=asset.name,bytes=asset.stat().st_size,sha256=digest(asset))]
             (root/'unexpected.bin').write_bytes(b'extra')
             with self.assertRaises(RuntimeError):verify_assets(root,rows)
+
+    def test_github_assets_include_both_editions_and_the_update(self):
+        prefix = 'VocalPitchLab-1.3.0-windows-x64'
+        attachments = {
+            f'{prefix}-cpu-offline-setup.exe': 'cpu',
+            f'{prefix}-setup.exe': 'nvidia',
+            f'{prefix}-setup-1.bin': 'nvidia',
+            f'{prefix}-setup-2.bin': 'nvidia',
+            f'{prefix}-setup-3.bin': 'nvidia',
+            f'{prefix}-update-from-1.2.0.exe': 'update-from-1.2.0',
+            'VocalPitchLab-1.3.0-source.zip': '',
+        }
+        for nested in (True, False):
+            with self.subTest(nested=nested), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                for name, subfolder in attachments.items():
+                    target = (root / subfolder if nested else root) / name
+                    target.parent.mkdir(exist_ok=True)
+                    target.write_bytes(b'fixture')
+                rows = prepare_github_assets(root)
+                self.assertEqual({row['name'] for row in rows}, attachments.keys())
+                self.assertTrue(all((root / row['path']).is_file() for row in rows))
+                instructions = (root / '安装说明.txt').read_text(encoding='utf-8-sig')
+                self.assertIn(f'{prefix}-cpu-offline-setup.exe', instructions)
+                self.assertIn(f'{prefix}-update-from-1.2.0.exe', instructions)
+                self.assertNotIn(f'{prefix}-offline-setup.exe', instructions)
+                second_volume = (root / 'nvidia' if nested else root) / f'{prefix}-setup-2.bin'
+                second_volume.unlink()
+                with self.assertRaisesRegex(SystemExit, 'Volume numbering is incomplete'):
+                    prepare_github_assets(root)
 
 if __name__=='__main__':unittest.main()

@@ -45,3 +45,18 @@ class AnalysisCacheTests(unittest.TestCase):
             with patch.object(cache,'DATA_ROOT',root),self.assertRaises(RuntimeError):
                 cache.stage('lead',{'version':'test'},interrupted)
             self.assertFalse(list(root.rglob('complete.json')))
+
+    def test_cleanup_runs_only_after_the_verified_output_is_published(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(cache,'DATA_ROOT',Path(temporary)):
+            def producer(work):
+                (work/'v.wav').write_bytes(b'temporary output')
+                path=work/'vocals.wav';path.write_bytes(b'published output')
+                return {'audio': path}
+            def cleanup(work):
+                published=json.loads((work.parent/'complete.json').read_text())['files']['audio']
+                self.assertEqual(cache.digest_file(work.parent/published['path']),published['sha256'])
+                (work/'v.wav').unlink()
+            paths,_=cache.stage('vocals',{'version':'test'},producer,after_publish=cleanup)
+            self.assertFalse(paths['audio'].with_name('v.wav').exists())
+            _,meta=cache.stage('vocals',{'version':'test'},producer,after_publish=lambda _:self.fail('Cache hit reran cleanup'))
+            self.assertTrue(meta['hit'])

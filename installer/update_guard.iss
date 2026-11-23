@@ -68,7 +68,7 @@ begin
 end;
 
 procedure RestoreBackup;
-var I, J: Integer; F, H, Rel, AllowedOld, AllowedNew, Key, Version: String;
+var I, J: Integer; F, H, Rel, AllowedOld, AllowedNew, Key, Version, DisplayName: String;
 begin
   if not FileExists(BackupDir + '\ready') then begin ClearBackup; Exit; end;
   { Validate every backup before restoring any file. }
@@ -98,7 +98,10 @@ begin
     Key := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{#AppIdentity}_is1';
     Version := GetIniString('previous', 'version', '', BackupDir + '\registration.ini');
     if Version <> '' then begin
-      if not RegWriteStringValue(HKCU, Key, 'DisplayVersion', Version) or
+      DisplayName := GetIniString('previous', 'display-name', 'VocalPitchLab ' + Version,
+        BackupDir + '\registration.ini');
+      if not RegWriteStringValue(HKCU, Key, 'DisplayName', DisplayName) or
+         not RegWriteStringValue(HKCU, Key, 'DisplayVersion', Version) or
          not RegWriteDWordValue(HKCU, Key, 'EstimatedSize',
            GetIniInt('previous', 'size', 0, 0, 2147483647, BackupDir + '\registration.ini')) then
         RaiseException('无法恢复安装记录，请使用完整安装包修复。');
@@ -154,7 +157,7 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
-var I: Integer; Actual, Rel, Ver, Key, PreviousDir, PreviousVersion: String; PreviousSize: Cardinal;
+var I: Integer; Actual, Rel, Ver, Key, PreviousDir, PreviousVersion, PreviousName: String; PreviousSize: Cardinal;
 begin
   Result := ''; Prepared := False; Committed := False; UpdateFailed := False;
   BackupDir := ExpandConstant('{app}\.vpl-update-{#AppVersion}');
@@ -185,8 +188,10 @@ begin
            (CompareText(RemoveBackslashUnlessRoot(PreviousDir), RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) = 0) then begin
           PreviousSize := 0;
           RegQueryStringValue(HKCU, Key, 'DisplayVersion', PreviousVersion);
+          RegQueryStringValue(HKCU, Key, 'DisplayName', PreviousName);
           RegQueryDWordValue(HKCU, Key, 'EstimatedSize', PreviousSize);
           if not SetIniString('previous', 'version', PreviousVersion, BackupDir + '\registration.ini') or
+             not SetIniString('previous', 'display-name', PreviousName, BackupDir + '\registration.ini') or
              not SetIniString('previous', 'size', IntToStr(PreviousSize), BackupDir + '\registration.ini') then
             RaiseException('无法备份安装记录。');
         end;
@@ -203,7 +208,10 @@ begin
       if not SaveStringToFile(BackupDir + '\ready', '{#FromVersion}-{#AppVersion}', False) then
         RaiseException('无法保存更新状态。');
       Prepared := True;
-    finally Progress.Hide; end;
+    except
+      Result := GetExceptionMessage;
+    end;
+    Progress.Hide;
   except Result := GetExceptionMessage; end;
 end;
 

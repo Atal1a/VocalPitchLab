@@ -1,6 +1,10 @@
 """Qt Quick frontend bridge. Analysis stays in the existing Python worker."""
-import csv,json,sys,uuid,subprocess,math,os,time,re
-from collections import OrderedDict
+import csv,hashlib,json,sys,uuid,subprocess,math,os,time,re
+from collections import OrderedDict, defaultdict
+from zipfile import BadZipFile
+from vocalpitchlab.audio import VIDEO_FORMATS
+from vocalpitchlab.analysis.recording import decoded_hash, prepared_original, recording_request, same_recording, source_signature
+from vocalpitchlab.analysis.analysis_cache import digest_file
 from vocalpitchlab.runtime.paths import APP_ROOT, DATA_ROOT, prepare, worker_python
 from vocalpitchlab.runtime.playback import configure_backend
 configure_backend(DATA_ROOT)
@@ -20,9 +24,7 @@ from PySide6.QtMultimedia import QMediaPlayer,QAudioOutput
 
 ROOT=APP_ROOT
 prepare()
-FORMATS={'.mp3','.wav','.flac','.m4a','.aac','.ogg','.wma','.aiff'}
-VIDEO_FORMATS={'.mp4','.mov','.m4v'}
-FORMATS|=VIDEO_FORMATS
+FORMATS={'.mp3','.wav','.flac','.m4a','.aac','.ogg','.wma','.aiff'} | VIDEO_FORMATS
 LABELS={'crepe_full':'CREPE 完整版','crepe_tiny':'CREPE 轻量版','rmvpe_vocals':'RMVPE','tuned_vocals':'调参候选'}
 COLORS={'crepe_full':'#0072b2','crepe_tiny':'#b45309','rmvpe_vocals':'#b01874','tuned_vocals':'#111827'}
 PITCH_MODES={'fusion':'tuned_vocals','crepe':'crepe_full','rmvpe':'rmvpe_vocals','tracked':'rmvpe_tracked','fcpe':'fcpe'}
@@ -34,6 +36,56 @@ def note(m):
 def write_json(path,value):
     temp=path.with_suffix('.tmp');temp.write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf-8');temp.replace(path)
 def local_path(value):return Path(QUrl(value).toLocalFile()) if str(value).startswith('file:') else Path(value)
+
+
+def source_key(source):
+    return os.path.normcase(os.path.abspath(source)) if source else ''
+
+
+def load_song_result(song):
+    from vocalpitchlab.analysis.presentation_results import read_curve
+
+    audio = song['audio']
+    for path in [audio['original'], audio['vocals'], *([song['full_vocals']] if song.get('full_vocals') else [])]:
+        if not Path(path).is_file():
+            raise FileNotFoundError(path)
+    curves = {k: p for k, p in song['curves'].items() if Path(p).is_file()}
+    if song.get('result_format') == 2 and len(curves) != len(song['curves']):
+        raise ValueError('Missing analysis curve')
+    if 'rmvpe_tracked' not in curves or 'fcpe' not in curves:
+        from vocalpitchlab.analysis.pitch_models import result_folder
+        experiment = result_folder(song)
+        if (experiment/'report.json').is_file():
+            for key in ['rmvpe_tracked', 'fcpe']:
+                path = experiment/(key+'.csv')
+                if key not in curves and path.is_file():
+                    curves[key] = str(path)
+    primary = next((k for k in ['rmvpe_tracked', 'rmvpe_vocals', 'tuned_vocals', 'crepe_full'] if k in curves), None)
+    if primary is None:
+        raise ValueError('Missing primary pitch curve')
+    times, values, _ = read_curve(curves[primary])
+    if not len(times):
+        raise ValueError('Empty pitch timeline')
+    notes = []
+    notes_path = song.get('main_notes')
+    if song.get('result_format') == 2 or (notes_path and Path(notes_path).is_file()):
+        notes = json.loads(Path(song['main_notes']).read_text(encoding='utf-8'))['notes']
+        if not isinstance(notes, list):
+            raise ValueError('Invalid note events')
+    return curves, primary, {primary: (times, values)}, notes
+
+
+RESULT_ERRORS = (OSError, ValueError, KeyError, TypeError, EOFError, BadZipFile)
+
+
+def combined_versions(*songs):
+    versions = {}
+    for song in songs:
+        versions.update({mode: result for mode, result in song.get('analysis_versions', {}).items()
+                         if same_recording(songs[-1], result)})
+        mode = song.get('algorithm', {}).get('separation', 'htdemucs')
+        versions[mode] = {k: v for k, v in song.items() if k not in ('analysis_versions', 'view')}
+    return versions
 
 
 class StemExport(QThread):
@@ -68,6 +120,7 @@ class Controller(QObject):
     languageChanged=Signal(str);localizedContentChanged=Signal()
     def __init__(self,folder=None,bootstrap=True,worker=None):
         super().__init__();self.changed.connect(self.frameChanged.emit);self.folder=Path(folder or DATA_ROOT/'library');self.folder.mkdir(parents=True,exist_ok=True);self.path=self.folder/'index.json'
+        self.view_folder=self.folder/'views';self.view_folder.mkdir(exist_ok=True);self.views={}
         if self.path.exists():self.data=json.loads(self.path.read_text(encoding='utf-8'))
         else:
             choices=sorted((DATA_ROOT/'results').glob('rmvpe-*/index.json')) if bootstrap else []
@@ -101,6 +154,8 @@ class Controller(QObject):
         self.t=0.;self.span=20.;self.low=48.;self.high=72.;self.auto=False;self.show_curve=True;self.show_blocks=True
         self.source='vocals';self.window_index=0;self.loop=False;self.pending=None;self.resume=False;self.changing=False;self.revision=0;self.buffer_seek=None
         self.loop_a=0.;self.loop_b=10.;self.loop_initialized=False;self.muted=False
+        self.transport_wanted=False
+        self.loop_restart=QTimer(self);self.loop_restart.setSingleShot(True);self.loop_restart.timeout.connect(self.restart_loop)
         self.show_blocks=self.settings['blocks'];self.show_curve=self.settings['curve']
         self.clock_anchor=QElapsedTimer();self.clock_anchor.start();self.anchor_t=0.;self.presentation=PresentationClock();self.presentation.reset(0,time.monotonic());self.presentation_pending=False
         self.player=QMediaPlayer(self);self.output=QAudioOutput(self);self.output.setVolume(self.settings['volume']);self.player.setAudioOutput(self.output)
@@ -121,15 +176,32 @@ class Controller(QObject):
     def save(self):
         self.data['settings']=self.settings;write_json(self.path,self.data)
         # Do not rebuild song delegates on selection, playback or job updates.
-        signature=tuple((s['name'],s['duration'],s.get('baseline')) for s in self.data['songs'])
+        signature=tuple((s['song_id'],s['name'],s['duration']) for s in self.data['songs'])
         if signature!=getattr(self,'library_signature',None):
             self.library_signature=signature;self.libraryChanged.emit()
     def remember_view(self):
-        if self.song:self.song['view']=dict(position=self.t,span=self.span,low=self.low,high=self.high,source=self.source,detailSpan=getattr(self,'detail_span',20.))
-    def persist_view(self):
         if self.song:
-            before=self.song.get('view');self.remember_view()
-            if before!=self.song['view']:self.save()
+            view=dict(position=self.t,span=self.span,low=self.low,high=self.high,source=self.source,detailSpan=getattr(self,'detail_span',20.))
+            if view!=self.song_view(self.song):self.save_view(self.song,view)
+
+    def song_view(self,song):
+        key=song['song_id']
+        if key not in self.views:
+            path=self.view_path(key)
+            self.views[key]=json.loads(path.read_text(encoding='utf-8')) if path.is_file() else song.get('view',{})
+        return self.views[key]
+
+    def view_path(self,key):
+        return self.view_folder/(hashlib.sha256(key.encode()).hexdigest()+'.json')
+
+    def save_view(self,song,view):
+        key=song['song_id']
+        write_json(self.view_path(key),view)
+        self.views[key]=view
+        song.pop('view',None)
+
+    def persist_view(self):
+        self.remember_view()
     def text(self,source):return localized(self.settings['language'],source)
     def feedback(self, text, **values):
         self.message = text
@@ -156,7 +228,9 @@ class Controller(QObject):
     @Property('QVariantList',notify=libraryChanged)
     def songs(self):return [dict(index=i,name=s['name'].replace('+-+',' · '),duration=clock(s['duration'])) for i,s in enumerate(self.data['songs'])]
     @Property('QVariantList',notify=localizedContentChanged)
-    def jobs(self):return [dict(id=j['id'],name=Path(j['source']).stem,state=j['state'],message=self.text(j.get('message',''))) for j in self.data['jobs'] if j['state'] not in ['complete','retried']]
+    def jobs(self):
+        return [dict(id=j['id'], name=Path(j['source']).stem, state=j['state'], message=self.text(j.get('message','')),
+                     canExport=bool(j.get('stems'))) for j in self.data['jobs'] if j['state'] not in ['complete','retried']]
     @Property('QVariantList',notify=contentChanged)
     def noteRows(self):return self.notes
     @Property('QVariantList',notify=contentChanged)
@@ -204,6 +278,7 @@ class Controller(QObject):
           gameNotesAvailable=bool(getattr(self,'game_notes_available',False)),
           highQualityAvailable=self.high_quality_available,
           activeSeparation=self.active_separation,
+          canImportStems=self.default_separation!='original',
           exportingStem=self.stem_export is not None,
           harmonySeparated=self.active_separation in ('mel_bs', 'bs_only'),
           separationCached=bool(self.song and self.default_separation in self.song.get('analysis_versions',{})),
@@ -214,6 +289,7 @@ class Controller(QObject):
           volume=self.settings['volume'],muted=self.muted,loopA=self.loop_a,loopB=self.loop_b,loopAText=clock(self.loop_a),loopBText=clock(self.loop_b),canUndo=bool(self.trash),
           job=bool(job),jobName=Path(job['source']).name if job else '',jobText=job_text,jobProgress=job.get('progress',0) if job else 0,
           jobId=job['id'] if job else '',jobMessage=job_message,jobQueued=bool(job and job['state']=='queued'),
+          jobStemsReady=bool(job and job.get('stems')),jobStemsOnly=bool(job and job['state']=='stems_ready'),
           running=bool(self.active),canRetry=bool(job and job['state'] in ['failed','cancelled','interrupted']))
 
     def state_playing(self):return self.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState
@@ -341,10 +417,12 @@ class Controller(QObject):
     def deleteSongs(self,indices):
         targets=sorted(set(int(i) for i in indices if 0<=int(i)<len(self.data['songs'])))
         if not targets:return
+        self.remember_view()
         current=self.song;self.trash=[(i,self.data['songs'][i]) for i in targets]
         self.data['songs']=[s for i,s in enumerate(self.data['songs']) if i not in targets]
         if self.selected in targets:
             self.release_piano_preview()
+            self.clear_transport()
             self.changing=True;self.player.stop();self.vocal_player.stop();self.player.setSource(QUrl());self.vocal_player.setSource(QUrl());self.audio_song=None;self.changing=False
             self.song=None;self.series={};self.notes=[];self.selected=-1;self.t=0.;self.loop=False;self.pending=None;self.buffer_seek=None;self.resume=False
             if self.data['songs']:self.selectSong(min(targets[0],len(self.data['songs'])-1))
@@ -354,11 +432,24 @@ class Controller(QObject):
     def undoDelete(self):
         if not self.trash:return
         current=self.song
-        for i,s in self.trash:self.data['songs'].insert(min(i,len(self.data['songs'])),s)
+        for i,song in self.trash:
+            existing=self.equivalent_song(song)
+            if existing is None:
+                self.data['songs'].insert(min(i,len(self.data['songs'])),song)
+                continue
+            existing['analysis_versions']=combined_versions(song, existing)
+            if existing is not current and not self.song_view(existing) and self.song_view(song):
+                self.save_view(existing,self.song_view(song))
         self.trash=[]
         if current:self.selected=next(i for i,s in enumerate(self.data['songs']) if s is current)
         else:self.selectSong(0)
         self.data['last_song']=max(0,self.selected);self.save();self.contentChanged.emit();self.feedback('已恢复歌曲。')
+
+    def equivalent_song(self, song):
+        key=source_key(song.get('source') or song['audio']['original'])
+        return next((existing for existing in self.data['songs']
+                     if source_key(existing.get('source') or existing['audio']['original'])==key
+                     and same_recording(existing, song)), None)
     @Slot(float,float)
     def setLoopRange(self,a,b):
         if not self.song:return
@@ -375,8 +466,30 @@ class Controller(QObject):
         if self.presentation_pending:return
         if self.player.mediaStatus() in [QMediaPlayer.MediaStatus.StalledMedia,QMediaPlayer.MediaStatus.InvalidMedia,QMediaPlayer.MediaStatus.NoMedia,QMediaPlayer.MediaStatus.EndOfMedia]:return
         self.t=min(self.song['duration'],self.presentation.value(time.monotonic()))
-        if self.loop and self.t>=self.loop_b:self.seek(self.loop_a)
-        else:self.frameChanged.emit()
+        if not self.check_loop(round(self.t*1000)):self.frameChanged.emit()
+
+    def clear_transport(self):
+        self.transport_wanted=False
+        self.loop_restart.stop()
+
+    def check_loop(self, position, *, ended=False):
+        if not self.song or not self.loop or not self.transport_wanted or self.changing:
+            return False
+        end=round(self.loop_b*1000)
+        duration=self.player.duration()
+        if ended:
+            # Some backends report Stopped after EndOfMedia, during the same notification.
+            self.loop_restart.start(0)
+            return True
+        if self.state_playing() and end<=position and (not duration or end<duration):
+            self.seek(self.loop_a)
+            return True
+        return False
+
+    def restart_loop(self):
+        if self.loop and self.transport_wanted:
+            self.seek(self.loop_a)
+            if not self.state_playing():self.player.play()
     def update_presentation_timer(self):
         if not self.closing and self.presentation_visible and self.state_playing():self.timer.start()
         else:self.timer.stop()
@@ -389,9 +502,11 @@ class Controller(QObject):
         else:self.release_piano_preview()
     def playback_changed(self,state):
         if state==QMediaPlayer.PlaybackState.PlayingState:
+            self.transport_wanted=True
             if self.active_separation != 'original':
                 self.vocal_player.setPosition(self.player.position());self.vocal_player.play()
-        elif state==QMediaPlayer.PlaybackState.PausedState:self.vocal_player.pause()
+        elif state==QMediaPlayer.PlaybackState.PausedState:
+            self.clear_transport();self.vocal_player.pause()
         else:self.vocal_player.stop()
         if not self.changing:
             self.presentation.reset(self.player.position()/1000,time.monotonic())
@@ -404,37 +519,28 @@ class Controller(QObject):
     def selectSong(self,index):
         if not 0<=index<len(self.data['songs']):return
         if self.song is self.data['songs'][index]:return
+        try:
+            result = load_song_result(self.data['songs'][index])
+        except RESULT_ERRORS:
+            self.feedback('这份结果的文件不完整，请选择其他歌曲或重新分析。');return
+        self.select_song(index, result)
+        self.save()
+
+    def select_song(self, index, result, *, keep_transport=False, resume=False):
         self.release_piano_preview()
         self.remember_view()
-        if not getattr(self,'analysis_swap',False):
+        if not keep_transport:
+            self.clear_transport()
             self.changing=True;self.player.stop();self.vocal_player.stop();self.changing=False
         song=self.data['songs'][index]
-        try:
-            series={}
-            curves=dict(song['curves'])
-            from vocalpitchlab.analysis.pitch_models import result_folder
-            experiment=result_folder(song)
-            for k in ['rmvpe_tracked','fcpe']:
-                if k not in curves and (experiment/'report.json').is_file() and (experiment/(k+'.csv')).is_file():curves[k]=str(experiment/(k+'.csv'))
-            for p in song['audio'].values():
-                if not Path(p).is_file():raise FileNotFoundError(p)
-            primary=next(k for k in ['rmvpe_tracked','rmvpe_vocals','tuned_vocals','crepe_full'] if k in curves and Path(curves[k]).is_file())
-            from vocalpitchlab.analysis.presentation_results import read_curve
-            times,values,_=read_curve(curves[primary])
-            if not len(times):raise ValueError('Empty pitch timeline')
-            series[primary]=(times,values)
-            notes=[]
-            if song.get('main_notes') and Path(song['main_notes']).is_file():
-                notes=json.loads(Path(song['main_notes']).read_text(encoding='utf-8'))['notes']
-        except Exception:
-            self.feedback('这份结果的文件不完整，请选择其他歌曲或重新分析。');return
+        curves, primary, series, notes = result
         self.song=song;self.selected=index;self.series=series;self.curve_paths=curves;self.primary=primary;self.notes=notes;self.compare=set();self.t=0.;self.loop=False;self.window_index=0
         self.curve_reliability={};self.mode_notes={primary:notes};self.note_onsets=None
         self.game_notes_available=False;self.game_notes=[];self.game_mode_notes={};self.prepared_primary=None
         self.loudness=(np.array([0.]),np.array([.5]));refresh=False
         try:
             self.install_presentation(song.get('presentation',{}))
-        except (OSError,ValueError,KeyError,TypeError):
+        except RESULT_ERRORS:
             refresh=True
             # Retain the old cached blocks while a separate worker refreshes.
             from vocalpitchlab.analysis.game_notes import display_cache_path
@@ -448,9 +554,9 @@ class Controller(QObject):
         self.apply_pitch_model()
         if refresh:self.queue_presentation(dict(song,curves=curves),song['curves'].get('rmvpe_tracked'))
         self.loop_a=0.;self.loop_b=min(10,song['duration']);self.loop_initialized=False;self.anchor_t=0.;self.clock_anchor.restart()
-        self.data['last_song']=index;self.save();self.contentChanged.emit()
+        self.data['last_song']=index;self.contentChanged.emit()
         self.message=''
-        view=song.get('view',{})
+        view=self.song_view(song)
         self.span=float(np.clip(view.get('span',20),0,300));self.t=float(np.clip(view.get('position',0),0,song['duration']))
         self.detail_span=self.clamp_span(view.get('detailSpan',self.span or 20))
         if self.span:self.span=self.clamp_span(self.span)
@@ -459,7 +565,9 @@ class Controller(QObject):
         if view.get('high',0)>view.get('low',0):self.low=float(view['low']);self.high=float(view['high'])
         self.setPitchWidth(self.high-self.low)
         self.readout_time=-1.;self.readout_pitch='—';self.preview_note=None
-        self.presentation.reset(self.t,time.monotonic());self.setSource(self.source);self.changed.emit()
+        self.presentation.reset(self.t,time.monotonic())
+        self.load_audio(self.source, keep_transport=keep_transport, resume=resume)
+        self.changed.emit()
 
     def install_presentation(self,value):
         from vocalpitchlab.analysis.presentation_results import load
@@ -625,13 +733,15 @@ class Controller(QObject):
     @Slot()
     def togglePlay(self):
         if not self.song:return
-        if self.player.playbackState()==QMediaPlayer.PlaybackState.PlayingState:self.player.pause()
+        if self.state_playing() or self.loop_restart.isActive():
+            self.clear_transport();self.player.pause()
         else:
             if self.loop and not self.loop_a<=self.t<self.loop_b:self.seek(self.loop_a)
             self.presentation.reset(self.t,time.monotonic());self.player.play()
     @Slot(float)
     def seek(self,seconds):
         if not self.song:return
+        self.loop_restart.stop()
         value=round(float(np.clip(seconds,0,self.song['duration']))*1000);self.revision+=1
         if self.pending is not None:self.pending=value
         if self.buffer_seek is not None:self.buffer_seek=value
@@ -646,12 +756,16 @@ class Controller(QObject):
         elif self.presentation_pending:
             self.presentation.reset(audio_t,time.monotonic());self.t=audio_t;self.presentation_pending=False
         else:self.t=self.presentation.feed(audio_t,time.monotonic())
-        if self.song and self.loop and playing and self.t>=self.loop_b:self.seek(self.loop_a);return
+        if not force and self.check_loop(ms):return
         if self.auto:self.fitRange(notify=False)
         if force or not playing:self.frameChanged.emit()
     @Slot(str)
     def setSource(self,source):
         if source not in ['original','vocals']:return
+        self.load_audio(source)
+        self.remember_view()
+
+    def load_audio(self, source, *, keep_transport=False, resume=False):
         self.source='original' if self.active_separation=='original' else source
         if not self.song:return
         if self.audio_song is self.song:
@@ -660,12 +774,12 @@ class Controller(QObject):
         vocal_path = self.song['audio']['vocals'] if self.active_separation != 'original' else None
         try:self.vocal_boost=float(self.song.get('presentation',{}).get('gain',1.))
         except (OSError,ValueError,RuntimeError):self.vocal_boost=1.
-        if getattr(self,'analysis_swap',False):
+        if keep_transport:
             self.t=self.player.position()/1000
             self.presentation.reset(self.t,time.monotonic())
             self.swap_vocal_source(vocal_path)
             self.apply_audio();self.changed.emit();return
-        self.revision+=1;self.pending=round(self.t*1000);self.buffer_seek=self.pending;self.resume=self.state['playing'];self.changing=True
+        self.revision+=1;self.pending=round(self.t*1000);self.buffer_seek=self.pending;self.resume=resume;self.changing=True
         self.player.stop();self.vocal_player.stop()
         self.vocal_pending=bool(vocal_path);self.vocal_buffer_pending=False
         self.vocal_player.setSource(QUrl.fromLocalFile(vocal_path) if vocal_path else QUrl())
@@ -682,6 +796,11 @@ class Controller(QObject):
         self.vocal_ready(self.vocal_player.mediaStatus())
     def media(self,status):
         if self.changing:return
+        if status==QMediaPlayer.MediaStatus.EndOfMedia:
+            if not self.check_loop(self.player.duration(), ended=True):self.clear_transport()
+            return
+        if status in (QMediaPlayer.MediaStatus.NoMedia, QMediaPlayer.MediaStatus.InvalidMedia):
+            self.clear_transport()
         if status in [QMediaPlayer.MediaStatus.LoadedMedia,QMediaPlayer.MediaStatus.BufferedMedia] and self.pending is not None:
             position=self.pending;self.pending=None;self.player.setPosition(position);self.vocal_player.setPosition(position)
             if self.resume:self.player.play()
@@ -696,6 +815,8 @@ class Controller(QObject):
     @Slot(bool)
     def setLoop(self,on):
         self.loop=on
+        if not on:
+            if self.loop_restart.isActive():self.clear_transport()
         if on and self.song and not self.loop_a<=self.t<self.loop_b:self.seek(self.loop_a)
         self.changed.emit()
     @Slot(str)
@@ -708,23 +829,46 @@ class Controller(QObject):
 
     @Slot(result='QVariantList')
     def stemExportOptions(self):
+        tracks = self.stem_tracks(self.song)
+        self.stem_options = (self.song, tracks)
+        return list(tracks)
+
+    def stem_tracks(self, song):
         from vocalpitchlab.audio.stem_export import stem_sources
         try:
-            tracks = stem_sources(self.song) if self.song else {}
+            tracks = stem_sources(song) if song else {}
         except (OSError, ValueError, RuntimeError):
             tracks = {}
-        self.stem_options = (self.song, tracks)
         if not tracks:
             self.feedback('没有可导出的分离音轨。')
-        return list(tracks)
+        return tracks
+
+    def ready_job(self, key):
+        return next((job for job in self.data['jobs'] if job['id']==key and job.get('stems')), None)
+
+    @Slot(str, result='QVariantList')
+    def jobStemExportOptions(self, key):
+        job = self.ready_job(key)
+        return list(self.stem_tracks(job['stems'] if job else None))
+
+    @Slot(str, str, result=QUrl)
+    def prepareJobStemExport(self, key, track):
+        job = self.ready_job(key)
+        if job:
+            return self.prepare_stem_export(job['stems'], self.stem_tracks(job['stems']), track)
+        self.feedback('没有可导出的分离音轨。')
+        return QUrl()
 
     @Slot(str, result=QUrl)
     def prepareStemExport(self, track):
-        if self.closing or self.stem_export or self.stem_export_request:
-            return QUrl()
         song, tracks = self.stem_options
         if not song or song is not self.song:
             self.feedback('歌曲已切换，请重新选择音轨。')
+            return QUrl()
+        return self.prepare_stem_export(song, tracks, track)
+
+    def prepare_stem_export(self, song, tracks, track):
+        if self.closing or self.stem_export or self.stem_export_request:
             return QUrl()
         if track not in tracks:
             self.feedback('没有可导出的分离音轨。')
@@ -746,7 +890,8 @@ class Controller(QObject):
             return
         song, sources, tracks = request
         protected = {str(path) for inputs in tracks.values() for path in inputs if isinstance(path, Path)}
-        songs = [song, *self.data['songs'], *(removed for _, removed in self.trash)]
+        songs = [song, *self.data['songs'], *(removed for _, removed in self.trash),
+                 *(job['stems'] for job in self.data['jobs'] if job.get('stems'))]
         for entry in songs:
             for result in (entry, *entry.get('analysis_versions', {}).values()):
                 audio = result.get('audio', {})
@@ -782,51 +927,130 @@ class Controller(QObject):
                     if not Path(p).is_file():raise ValueError('missing')
             known={s['audio']['original'] for s in self.data['songs']}
             for s in songs:
-                if s['audio']['original'] not in known:self.data['songs'].append(s);known.add(s['audio']['original'])
+                if s['audio']['original'] not in known:
+                    s['song_id']=uuid.uuid4().hex
+                    self.data['songs'].append(s);known.add(s['audio']['original'])
             self.save();self.contentChanged.emit()
             if self.data['songs']:self.selectSong(len(self.data['songs'])-1)
         except Exception:self.feedback('无法打开结果，请保留 index.json 引用的音频及分析文件。')
 
     @Slot(str)
     def enqueue(self,url):
-        path=local_path(url).resolve()
-        if not path.is_file() or path.suffix.lower() not in FORMATS:self.feedback('请选择支持的音频或视频文件。');return
-        try:stat=path.stat();signature=[stat.st_size,stat.st_mtime_ns]
-        except OSError:self.feedback('无法读取音频文件，请检查权限或文件是否仍存在。');return
-        matching=lambda p:os.path.normcase(str(Path(p).resolve()))==os.path.normcase(str(path))
-        for j in self.data['jobs']:
-            if matching(j['source']) and j['state'] in ['queued','running']:
-                self.feedback('这首歌已在分析队列中。');return
-            if matching(j['source']) and j['state']=='complete' and j.get('signature')==signature:
-                if any(matching(s.get('source','')) for s in self.data['songs']):self.feedback('这首歌已有分析结果，请在歌曲库中打开。');return
-        for s in self.data['songs']:
-            if s.get('source') and matching(s['source']) and not any(matching(j['source']) for j in self.data['jobs']):
-                self.feedback('这首歌已在歌曲库中。');return
-        if path.suffix.lower() in VIDEO_FORMATS:
-            from vocalpitchlab.audio.audio_io import audio_stream_count
-            tracks=audio_stream_count(path)
-            if tracks==0:self.feedback('这个文件没有音轨，请换一个文件。');return
-            if tracks and tracks>1:self.feedback('这个文件包含多段音轨，将分析默认音轨。')
-        self.data['jobs'].append(dict(id=uuid.uuid4().hex,source=str(path),signature=signature,separation=self.default_separation,state='queued',progress=0,message='等待分析'))
-        self.save();self.contentChanged.emit();self.start_next()
-        if not self.active:self.changed.emit()
-    def install_analysis(self,song,target_id):
+        self.enqueueBatch([url])
+
+    @Slot('QVariantList')
+    @Slot('QVariantList', bool)
+    def enqueueBatch(self, urls, stems_only=False):
+        if stems_only and self.default_separation == 'original':
+            self.feedback('请先开启人声或和声分离。');return
+        songs, jobs = defaultdict(list), defaultdict(list)
+        for song in self.data['songs']:
+            if song.get('source'):songs[source_key(song['source'])].append(song)
+        for job in self.data['jobs']:
+            jobs[source_key(job['source'])].append(job)
+        added, message = [], None
+        for url in urls:
+            try:
+                path=local_path(url).resolve()
+                if path.suffix.lower() not in FORMATS or not path.is_file():
+                    message='请选择支持的音频或视频文件。';continue
+                signature=source_signature(path)
+                key=source_key(path)
+                new_job, result_message = self.import_job(path, signature, songs[key], jobs[key], stems_only=stems_only)
+            except OSError:
+                message='无法读取文件，请检查权限或文件是否仍存在。';continue
+            if new_job is None:
+                message=result_message;continue
+            added.append(new_job);jobs[key].append(new_job)
+        if added:
+            self.data['jobs'].extend(added)
+            self.save();self.contentChanged.emit();self.start_next();self.changed.emit()
+        if message:self.feedback(message)
+
+    def import_job(self, path, signature, songs, jobs, *, stems_only=False):
+        pending=[j for j in jobs if j['state'] in ('queued','running')]
+        if any(j.get('signature') == signature and (stems_only or not j.get('stems_only')) for j in pending):
+            return None, '这首歌已在分析队列中。'
+        same_source = None
+        if any(s.get('source_sha256') for s in songs):
+            source_hash = digest_file(path)
+            same_source = next((s for s in songs if s.get('source_sha256') == source_hash), None)
+        if same_source is None:
+            same_source = next((s for s in songs if not s.get('source_sha256') and s.get('source_signature') == signature), None)
+        if same_source is None and len(songs)==1 and not songs[0].get('source_sha256'):
+            previous = [j for j in jobs if j['state']=='complete' and not j.get('target_id')]
+            if len(previous)==1 and previous[0].get('signature')==signature:same_source=songs[0]
+        job = dict(id=uuid.uuid4().hex, source=str(path), signature=signature, separation=self.default_separation,
+                   state='queued', progress=0, message='等待分离音轨' if stems_only else '等待分析')
+        if stems_only:
+            job['stems_only'] = True
+            if any(j['state']=='stems_ready' and j.get('signature')==signature and
+                   j['separation']==self.default_separation and j.get('stems') for j in jobs):
+                return None, '音轨已就绪，请在任务列表导出。'
+        if same_source is not None:
+            try:
+                load_song_result(same_source)
+            except RESULT_ERRORS:
+                if stems_only:
+                    return job, None
+                target = same_source['song_id']
+                if any(j.get('target_id') == target for j in pending):
+                    return None, '这首歌已在分析队列中。'
+                job.update(target_id=target, recording=recording_request(same_source),
+                           separation=same_source.get('algorithm', {}).get('separation', 'htdemucs'), message='等待修复分析结果')
+            else:
+                if not stems_only or same_source.get('algorithm',{}).get('separation')==self.default_separation:
+                    return None, '这首歌已有分析结果，请在歌曲库中打开。'
+        return job, None
+
+    @Slot(str)
+    def analyzeReadyJob(self, key):
+        ready=self.ready_job(key)
+        if not ready or ready['state']!='stems_ready':return
+        stems=ready['stems'];source=source_key(stems['source'])
+        existing=self.equivalent_song(stems)
+        if existing:
+            try:
+                load_song_result(existing)
+            except RESULT_ERRORS:
+                pass
+            else:
+                self.feedback('这首歌已有分析结果，请在歌曲库中打开。');return
+        if any(j['state'] in ('queued','running') and not j.get('stems_only') and source_key(j['source'])==source and
+               ((stems.get('source_signature') and j.get('signature')==stems['source_signature']) or
+                (j.get('recording') and j['recording']['decoded_sha256']==decoded_hash(stems))) for j in self.data['jobs']):
+            self.feedback('这首歌已在分析队列中。');return
+        job=dict(id=uuid.uuid4().hex, source=stems['source'], signature=stems.get('source_signature'),
+                 recording=recording_request(stems), separation=ready['separation'], state='queued', progress=0, message='等待分析')
+        if existing:
+            job.update(target_id=existing['song_id'], separation=existing.get('algorithm',{}).get('separation','htdemucs'),
+                       message='等待修复分析结果')
+        self.data['jobs'].append(job)
+        self.save();self.contentChanged.emit();self.start_next();self.changed.emit()
+
+    def install_analysis(self, song, target_id, result=None):
         index=next((i for i,s in enumerate(self.data['songs']) if s.get('song_id')==target_id),None)
         if index is None:return False
         old=self.data['songs'][index]
-        if self.song is old:self.remember_view()
-        versions=dict(old.get('analysis_versions',{}))
-        snapshot=lambda s:{k:v for k,v in s.items() if k not in ['analysis_versions','view']}
-        versions[old.get('algorithm',{}).get('separation','htdemucs')]=snapshot(old)
-        versions[song.get('algorithm',{}).get('separation','htdemucs')]=snapshot(song)
+        if not same_recording(old, song):
+            raise ValueError('Analysis belongs to a different recording')
+        if result is None:
+            result = load_song_result(song)
         current=self.song is old
-        new=dict(song,song_id=target_id,view=dict(old.get('view',{})),analysis_versions=versions)
+        if current:self.remember_view()
+        song=dict(song, name=old['name'], source=old.get('source') or song.get('source'),
+                  source_signature=old.get('source_signature') or song.get('source_signature'))
+        new=dict(song,song_id=target_id,view=dict(old.get('view',{})),analysis_versions=combined_versions(old, song))
         self.data['songs'][index]=new
         if current:
             loop_state=(self.loop,self.loop_a,self.loop_b,self.loop_initialized)
-            self.analysis_swap=True
-            try:self.song=None;self.selectSong(index)
-            finally:self.analysis_swap=False
+            playing=self.state_playing()
+            loaded_path=self.player.source().toLocalFile()
+            verified=recording_request(song)
+            verified['original']=loaded_path
+            keep_transport=bool(loaded_path and self.audio_song is old and prepared_original(verified))
+            self.song=None
+            self.select_song(index, result, keep_transport=keep_transport, resume=playing)
             self.loop,self.loop_a,self.loop_b,self.loop_initialized=loop_state
         self.save();return True
     @Slot()
@@ -845,16 +1069,20 @@ class Controller(QObject):
         if any(j.get('target_id')==target and j['state'] in ['running','queued'] for j in self.data['jobs']):
             self.feedback('这首歌已在分析队列中。');return
         cached=self.song.get('analysis_versions',{}).get(mode)
-        if cached and all(Path(p).is_file() for p in list(cached['audio'].values())+list(cached['curves'].values())+[cached['main_notes']]):
-            self.install_analysis(cached,target);self.feedback('已切换人声分离结果。');return
+        if cached and same_recording(self.song, cached) and prepared_original(recording_request(cached)):
+            try:
+                self.install_analysis(cached,target)
+            except RESULT_ERRORS:
+                pass
+            else:
+                self.feedback('已切换人声分离结果。');return
         if mode in ('mel_roformer', 'mel_bs') and not self.high_quality_available:
             self.feedback('人声模型尚未安装。');return
         if mode in ('bs_only', 'mel_bs') and not self.harmony_available:
             self.feedback('和声分离模型尚未安装。');return
-        source=Path(self.song.get('source',''))
-        if not source.is_file():source=Path(self.song['audio']['original'])
-        if not source.is_file():self.feedback('原音频已不存在，请重新导入。');return
-        self.data['jobs'].append(dict(id=uuid.uuid4().hex,source=str(source),target_id=target,
+        source=self.song.get('source') or self.song['audio']['original']
+        self.data['jobs'].append(dict(id=uuid.uuid4().hex,source=source,target_id=target,
+            recording=recording_request(self.song),
             separation=mode,state='queued',progress=0,message='等待重新分析'))
         self.save();self.contentChanged.emit();self.start_next();self.changed.emit()
     @Slot(str)
@@ -891,9 +1119,15 @@ class Controller(QObject):
             p.finished.connect(lambda code,*args,proc=p:self.worker_exited(proc,code))
             p.errorOccurred.connect(lambda e,proc=p:self.worker_exited(proc,-1) if e==QProcess.ProcessError.FailedToStart else None)
             if self.reusable_worker:p.start(worker_python(),['-u',str(ROOT/'main.py'),'--analysis-worker'])
-            else:p.start(worker_python(),['-u',str(self.worker),job['source'],'--standalone','--result-file',str(self.result_file),'--separation',job.get('separation','htdemucs')])
+            else:
+                args=['-u',str(self.worker),job['source'],'--standalone','--result-file',str(self.result_file),'--separation',job.get('separation','htdemucs')]
+                if job.get('stems_only'):args.append('--stems-only')
+                if job.get('recording'):args.extend(['--recording',json.dumps(job['recording'])])
+                p.start(worker_python(),args)
         if self.reusable_worker:
             request=dict(id=job['id'],source=job['source'],result_file=str(self.result_file),separation=job.get('separation','htdemucs'))
+            if job.get('recording'):request['recording']=job['recording']
+            if job.get('stems_only'):request['stems_only']=True
             self.process.write((json.dumps(request)+'\n').encode('utf-8'))
         self.contentChanged.emit();self.changed.emit()
 
@@ -915,12 +1149,27 @@ class Controller(QObject):
             if line.startswith('VPL_JOB_DONE ') and self.reusable_worker and self.active:
                 try:
                     done=json.loads(line[13:])
-                    if done.get('id')==self.active['id']:self.finished(int(done['code']),job_done=True)
+                    if done.get('id')==self.active['id']:
+                        self.finished(int(done['code']),job_done=True,error_message=done.get('error'))
                 except (ValueError,TypeError,KeyError):pass
             elif line.startswith('VPL_EVENT ') and self.active:
-                try:self.active.update(json.loads(line[10:]));self.changed.emit()
+                try:
+                    event=json.loads(line[10:])
+                    if 'notice' in event:
+                        self.feedback(event['notice'],name=Path(self.active['source']).name)
+                    else:
+                        self.active.update(event)
+                        self.changed.emit()
                 except (ValueError,TypeError):pass
-    def finished(self,code,*args,job_done=False):
+            elif line.startswith('VPL_STEMS_READY ') and self.active and self.active['state']=='running':
+                try:
+                    event=json.loads(line[16:]);stems=event['stems']
+                    expected=self.active['id'] if self.reusable_worker else None
+                    if event['id']==expected and stems['algorithm']['separation']==self.active.get('separation','htdemucs'):
+                        self.active['stems']=stems
+                        self.save();self.contentChanged.emit();self.changed.emit()
+                except (ValueError,TypeError,KeyError):pass
+    def finished(self,code,*args,job_done=False,error_message=None):
         if not self.process or not self.active:return
         if not job_done:self.read_progress()
         if not self.active:return
@@ -929,21 +1178,22 @@ class Controller(QObject):
         if job['state']=='cancelled':job['message']='已取消，可重试'
         elif code==0 and self.result_file.exists():
             try:
-                song=json.loads(self.result_file.read_text(encoding='utf-8'))['song']
-                for path in list(song['audio'].values())+list(song['curves'].values())+[song['main_notes']]:
-                    if not Path(path).exists():raise ValueError('missing')
-                if job.get('target_id'):
-                    target=next((s for s in self.data['songs'] if s.get('song_id')==job['target_id']),None)
-                    if target:song['name']=target['name'];song['source']=target.get('source',job['source'])
-                    installed=self.install_analysis(song,job['target_id'])
-                    job.update(state='complete',message='分析完成，已保存' if installed else '歌曲已移除，未恢复到歌曲库',progress=100)
+                payload=json.loads(self.result_file.read_text(encoding='utf-8'))
+                if job.get('stems_only'):
+                    from vocalpitchlab.audio.stem_export import stem_sources
+                    stems=payload['stems']
+                    if not stem_sources(stems):raise ValueError('Missing exportable tracks')
+                    job.update(state='stems_ready',message='音轨已就绪',progress=100,stems=stems)
                 else:
-                    song['song_id']=uuid.uuid4().hex;self.data['songs'].append(song);job.update(state='complete',message='分析完成，已保存',progress=100);self.selectSong(len(self.data['songs'])-1)
-            except Exception:job.update(state='failed',message='结果未完整保存，请重试')
+                    self.finish_analysis(job,payload['song'])
+            except RESULT_ERRORS:job.update(state='failed',message='结果未完整保存，请重试')
+        elif error_message:
+            job.update(state='failed',message=error_message)
         else:
             log=self.log_file.read_text(encoding='utf-8',errors='replace')[-12000:] if self.log_file.exists() else ''
             reason='音频读取或分析失败，可重新导入或重试'
-            if 'out of memory' in log.lower():reason='显存或内存不足，关闭其他占用较大的程序后重试'
+            if 'RecordingChanged:' in log:reason='库内原录音无法恢复，请单独导入新录音。'
+            elif 'out of memory' in log.lower():reason='显存或内存不足，关闭其他占用较大的程序后重试'
             elif 'PermissionError' in log:reason='文件访问受限，请检查文件权限后重试'
             elif 'No space left' in log or 'disk full' in log.lower():reason='磁盘空间不足，清理后重试'
             elif 'FileNotFoundError' in log:reason='音频或模型文件缺失，请检查后重试'
@@ -958,6 +1208,20 @@ class Controller(QObject):
         else:
             self.worker_closing=False;p.deleteLater()
         QTimer.singleShot(0,self.start_next)
+
+    def finish_analysis(self, job, song):
+        result=load_song_result(song)
+        if job.get('target_id'):
+            installed=self.install_analysis(song,job['target_id'],result)
+        else:
+            existing=self.equivalent_song(song)
+            if existing:
+                self.install_analysis(song,existing['song_id'],result)
+            else:
+                song['song_id']=uuid.uuid4().hex;self.data['songs'].append(song);self.select_song(len(self.data['songs'])-1,result)
+            installed=True
+        job.pop('stems',None)
+        job.update(state='complete',message='分析完成，已保存' if installed else '歌曲已移除，未恢复到歌曲库',progress=100)
     def stop_worker(self):
         if not self.process:return
         pid=int(self.process.processId())
@@ -975,14 +1239,15 @@ class Controller(QObject):
     def retry(self):
         job=self.display_job
         if job and job['state'] in ['failed','cancelled','interrupted']:
-            if not Path(job['source']).is_file():self.feedback('原音频已不存在，请重新导入。');return
-            replacement={k:v for k,v in job.items() if k not in ['id','state','message','progress','remove_after_stop']}
+            if not job.get('recording') and not Path(job['source']).is_file():self.feedback('原音频已不存在，请重新导入。');return
+            replacement={k:v for k,v in job.items() if k not in ['id','state','message','progress','remove_after_stop','stems']}
             replacement.update(id=uuid.uuid4().hex,state='queued',message='等待重试',progress=0)
             job['state']='retried';self.data['jobs'].append(replacement);self.save();self.contentChanged.emit();self.start_next()
             if not self.active:self.changed.emit()
     @Slot()
     def shutdown(self):
         self.closing=True;self.presentation_queue.clear()
+        self.clear_transport()
         if self.stem_export:
             self.stem_export.requestInterruption()
             self.stem_export.wait()

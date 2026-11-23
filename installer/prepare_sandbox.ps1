@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory=$true)][string]$SetupDirectory,
     [Parameter(Mandatory=$true)][string]$AudioFile,
-    [string]$RunName = ('sandbox-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    [string]$RunName = ('sandbox-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
+    [ValidateSet('nvidia','cpu')][string]$Runtime = 'nvidia'
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -27,7 +28,7 @@ $o = [Security.SecurityElement]::Escape($outputDir)
 <MappedFolder><HostFolder>$i</HostFolder><SandboxFolder>C:\VPLQAInput</SandboxFolder><ReadOnly>true</ReadOnly></MappedFolder>
 <MappedFolder><HostFolder>$o</HostFolder><SandboxFolder>C:\VPLQAOutput</SandboxFolder><ReadOnly>false</ReadOnly></MappedFolder>
 </MappedFolders>
-<LogonCommand><Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\VPLQAInput\run.ps1</Command></LogonCommand>
+<LogonCommand><Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\VPLQAInput\run.ps1 -Runtime $Runtime</Command></LogonCommand>
 </Configuration>
 "@ | Set-Content "$inputDir\validate.wsb" -Encoding UTF8
 Write-Output "Prepared: $inputDir\validate.wsb"

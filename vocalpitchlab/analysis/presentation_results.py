@@ -1,22 +1,55 @@
 """Prepare reusable note/display data without running any neural models."""
 import csv
+import hashlib
+import io
 import json
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from zipfile import BadZipFile
 import numpy as np
 from vocalpitchlab.analysis.analysis_cache import stage, digest_file, atomic_json
 
 PRESENTATION_VERSION = 'presentation-v1'
+CURVE_CACHE_VERSION = 1
+CURVE_FIELDS = ('time', 'midi', 'score')
 
 
-def read_curve(path):
-    with Path(path).open(encoding='utf-8-sig') as stream:
-        rows = list(csv.DictReader(stream))
+def parse_curve(data):
+    rows = list(csv.DictReader(io.StringIO(data.decode('utf-8-sig'), newline='')))
     times = np.array([float(r['time_seconds']) for r in rows])
     midi = np.array([float(r['midi_float']) if r['midi_float'] else np.nan for r in rows])
     score = np.array([float(r.get('rmvpe_max_salience', r.get('periodicity_or_probability', 0)) or 0) for r in rows])
     if len(times) and (not np.isfinite(times).all() or np.any(np.diff(times) <= 0)):
         raise ValueError('Invalid curve timestamps')
     return times, midi, score
+
+
+def read_curve(path):
+    path = Path(path)
+    sidecar = path.with_suffix('.curve.npz')
+    data = path.read_bytes()
+    identity = hashlib.sha256(data).hexdigest()
+    try:
+        with sidecar.open('rb') as stream, np.load(stream, allow_pickle=False) as stored:
+            if stored['version'].item() == CURVE_CACHE_VERSION and stored['source'].item() == identity:
+                arrays = tuple(stored[key] for key in CURVE_FIELDS)
+                if arrays[0].ndim == 1 and all(a.dtype == np.float64 and a.shape == arrays[0].shape for a in arrays):
+                    return arrays
+    except (OSError, ValueError, KeyError, TypeError, EOFError, BadZipFile):
+        pass
+
+    arrays = parse_curve(data)
+    temporary = None
+    try:
+        with NamedTemporaryFile(dir=path.parent, prefix='.curve-', suffix='.tmp', delete=False) as stream:
+            temporary = Path(stream.name)
+            np.savez(stream, version=CURVE_CACHE_VERSION, source=identity, **dict(zip(CURVE_FIELDS, arrays)))
+        temporary.replace(sidecar)
+    except OSError:
+        # A read-only imported result is still usable through its CSV.
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return arrays
 
 
 def prepare(song):
@@ -88,9 +121,9 @@ def load(value):
     if value.get('settings')!=RECONCILE_SETTINGS or (not value.get('game_available') and value.get('fallback_settings')!=current_settings()):
         raise ValueError('Note settings changed')
     notes = json.loads(Path(value['notes']).read_text(encoding='utf-8'))['notes']
-    with np.load(value['evidence'], allow_pickle=False) as d:
+    with Path(value['evidence']).open('rb') as stream, np.load(stream, allow_pickle=False) as d:
         evidence = (d['time'], d['weight'])
-    with np.load(value['loudness'], allow_pickle=False) as d:
+    with Path(value['loudness']).open('rb') as stream, np.load(stream, allow_pickle=False) as d:
         loudness = (d['time'], d['level'])
     for times,values in (evidence,loudness):
         if times.ndim!=1 or values.shape!=times.shape or not np.isfinite(times).all() or not np.isfinite(values).all() or np.any(np.diff(times)<=0):

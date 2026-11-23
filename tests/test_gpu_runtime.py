@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from installer.gpu_runtime import validate_gpu_dependencies
+from installer.gpu_runtime import validate_gpu_dependencies, validate_runtime_dependencies
 
 
 class GpuRuntimeTests(unittest.TestCase):
@@ -21,6 +21,17 @@ class GpuRuntimeTests(unittest.TestCase):
                 validate_gpu_dependencies(root, lock)
             (root/'torch.dist-info/METADATA').write_text('Metadata-Version: 2.1\nName: torch\nVersion: 2.7.1+cu128\n')
             self.assertEqual(validate_gpu_dependencies(root, lock)['torch'], '2.7.1+cu128')
+
+    def test_cpu_validation_rejects_leftover_cuda_dll(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            for name, version in [('torch', '2.7.1+cpu'), ('torchaudio', '2.7.1+cpu'), ('sympy', '1.14.0')]:
+                folder=root/f'{name}.dist-info';folder.mkdir()
+                (folder/'METADATA').write_text(f'Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n')
+            self.assertEqual(validate_runtime_dependencies(root,'cpu')['torch'],'2.7.1+cpu')
+            lib=root/'torch/lib';lib.mkdir(parents=True);(lib/'torch_cuda.dll').touch()
+            with self.assertRaisesRegex(ValueError,'CUDA libraries'):
+                validate_runtime_dependencies(root,'cpu')
 
 
 if __name__ == '__main__':
